@@ -104,7 +104,7 @@ if systemctl is-active --quiet proxy-relay; then
     log_info "✓ proxy-relay 服务运行正常"
     
     # 启动 sing-box
-    if [ -f "/etc/proxy-relay/sing-box.json" ]; then
+    if [ -f "/etc/sing-box/config.json" ]; then
         log_info "启动 sing-box..."
         systemctl start sing-box
         sleep 2

@@ -53,7 +53,7 @@ sudo apt install -y \
 
 ```bash
 # 下载 sing-box 最新版本
-SINGBOX_VERSION="1.8.0"
+SINGBOX_VERSION="1.12.15"
 wget https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz
 
 # 解压并安装

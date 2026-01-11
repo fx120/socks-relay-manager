@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ProxyManager:
     """代理管理器类"""
     
-    DEFAULT_SINGBOX_CONFIG_PATH = "/etc/proxy-relay/sing-box.json"
+    DEFAULT_SINGBOX_CONFIG_PATH = "/etc/sing-box/config.json"
     DEFAULT_SINGBOX_PID_FILE = "/var/run/sing-box.pid"
     
     def __init__(self, config_manager: ConfigManager, api_client=None, database=None):
@@ -78,22 +78,43 @@ class ProxyManager:
                 "listen": "0.0.0.0",
                 "listen_port": proxy.local_port
             }
+            
+            # 如果配置了本地认证，添加认证信息
+            if proxy.local_username and proxy.local_password:
+                inbound["users"] = [{
+                    "username": proxy.local_username,
+                    "password": proxy.local_password
+                }]
+                logger.debug(f"Added local authentication for proxy {proxy.name}")
+            
             inbounds.append(inbound)
             
-            # 生成outbound配置（上游代理）
+            # 生成outbound配置
             outbound_tag = f"upstream-{proxy.local_port}"
-            outbound = {
-                "type": proxy.upstream.protocol,
-                "tag": outbound_tag,
-                "server": proxy.upstream.server,
-                "server_port": proxy.upstream.port
-            }
             
-            # 如果需要认证，添加认证信息
-            if proxy.upstream.username and proxy.upstream.password:
-                outbound["username"] = proxy.upstream.username
-                outbound["password"] = proxy.upstream.password
-                logger.debug(f"Added authentication for proxy {proxy.name}")
+            if proxy.upstream is None:
+                # Direct 模式：直接连接，不使用上游代理
+                outbound = {
+                    "type": "direct",
+                    "tag": outbound_tag
+                }
+                logger.debug(f"Using direct mode for proxy {proxy.name}")
+            else:
+                # 上游代理模式
+                # sing-box 使用 "socks" 而不是 "socks5"
+                outbound_type = "socks" if proxy.upstream.protocol == "socks5" else proxy.upstream.protocol
+                outbound = {
+                    "type": outbound_type,
+                    "tag": outbound_tag,
+                    "server": proxy.upstream.server,
+                    "server_port": proxy.upstream.port
+                }
+                
+                # 如果需要认证，添加认证信息
+                if proxy.upstream.username and proxy.upstream.password:
+                    outbound["username"] = proxy.upstream.username
+                    outbound["password"] = proxy.upstream.password
+                    logger.debug(f"Added upstream authentication for proxy {proxy.name}")
             
             outbounds.append(outbound)
             
@@ -201,25 +222,58 @@ class ProxyManager:
             bool: 成功返回True，失败返回False
         """
         try:
-            # 尝试读取PID文件
-            if os.path.exists(self.singbox_pid_file):
-                with open(self.singbox_pid_file, 'r') as f:
-                    pid = int(f.read().strip())
+            # 检查 sing-box 服务是否运行
+            result = subprocess.run(
+                ["sudo", "systemctl", "is-active", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                # 服务正在运行，重启以应用新配置
+                logger.info("Restarting sing-box service to apply new configuration")
+                result = subprocess.run(
+                    ["sudo", "systemctl", "restart", "sing-box"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
                 
-                logger.info(f"Sending SIGHUP to sing-box process (PID: {pid})")
-                # 发送SIGHUP信号重载配置
-                os.kill(pid, signal.SIGHUP)
-                logger.info("SIGHUP signal sent successfully")
-                return True
+                if result.returncode == 0:
+                    logger.info("sing-box service restarted successfully")
+                    # 等待服务启动
+                    import time
+                    time.sleep(1)
+                    return True
+                else:
+                    logger.error(f"Failed to restart sing-box: stderr={result.stderr}, stdout={result.stdout}")
+                    return False
             else:
-                # PID文件不存在，可能sing-box未运行
-                # 这不一定是错误，可能是首次配置
-                logger.warning("sing-box PID file not found, process may not be running")
-                return True
+                # 服务未运行，尝试启动
+                logger.info("sing-box service not running, attempting to start")
+                result = subprocess.run(
+                    ["sudo", "systemctl", "start", "sing-box"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
                 
-        except (ValueError, ProcessLookupError, PermissionError) as e:
-            # PID无效或进程不存在或权限不足
-            logger.error(f"Failed to reload sing-box: {e}")
+                if result.returncode == 0:
+                    logger.info("sing-box service started successfully")
+                    # 等待服务启动
+                    import time
+                    time.sleep(1)
+                    return True
+                else:
+                    logger.error(f"Failed to start sing-box: stderr={result.stderr}, stdout={result.stdout}")
+                    # 检查是否是配置文件问题
+                    if not os.path.exists(self.singbox_config_path):
+                        logger.error(f"sing-box config file not found: {self.singbox_config_path}")
+                    return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout while reloading sing-box")
             return False
         except Exception as e:
             logger.error(f"Unexpected error reloading sing-box: {e}")

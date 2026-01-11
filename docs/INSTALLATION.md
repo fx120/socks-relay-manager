@@ -128,7 +128,7 @@ sudo apt install -y \
 
 ```bash
 # 设置版本号
-SINGBOX_VERSION="1.8.0"
+SINGBOX_VERSION="1.12.15"
 
 # 检测系统架构
 ARCH=$(uname -m)

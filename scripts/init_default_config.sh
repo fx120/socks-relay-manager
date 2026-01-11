@@ -11,7 +11,7 @@ WEB_PORT="${2:-8080}"
 echo "生成默认配置文件: $CONFIG_FILE"
 
 # 生成 admin123 的密码哈希
-# $2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIq.Ejm2W2
+# $2b$12$1c2VUJ/qJ22vx61Lz2hQVuQxaajQ7xOeDNICdaiVaOWR68etVh572
 
 cat > "$CONFIG_FILE" << EOF
 # ============================================================================
@@ -32,7 +32,7 @@ system:
     enabled: true
     username: admin
     # 默认密码: admin123 (⚠️ 首次登录后必须修改！)
-    password_hash: "\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIq.Ejm2W2"
+    password_hash: "\$2b\$12\$1c2VUJ/qJ22vx61Lz2hQVuQxaajQ7xOeDNICdaiVaOWR68etVh572"
   log_level: INFO
   log_file: /var/log/proxy-relay/app.log
   log_max_size: 104857600

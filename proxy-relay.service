@@ -28,8 +28,8 @@ Environment="PROXY_RELAY_CONFIG=/etc/proxy-relay/config.yaml"
 Environment="PYTHONUNBUFFERED=1"
 
 # 安全加固选项
-# 防止提权
-NoNewPrivileges=true
+# 注意: NoNewPrivileges 会阻止 sudo 调用，已禁用以允许管理 sing-box 服务
+# NoNewPrivileges=true
 
 # 私有临时目录
 PrivateTmp=true

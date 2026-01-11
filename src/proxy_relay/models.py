@@ -97,9 +97,12 @@ class ProxyConfig:
     """代理配置"""
     local_port: int
     name: str
-    api_provider_id: str
-    upstream: UpstreamProxy
+    api_provider_id: Optional[str] = None  # 可选，仅在使用 API 获取上游代理时需要
+    upstream: Optional[UpstreamProxy] = None  # 可选，如果为 None 则使用 direct 模式
     monitoring_enabled: bool = False
+    # SOCKS5 本地认证配置（可选）
+    local_username: Optional[str] = None
+    local_password: Optional[str] = None
     
     def __post_init__(self):
         """数据验证"""
@@ -109,10 +112,14 @@ class ProxyConfig:
             raise ValueError(f"local_port must be between 1024 and 65535, got {self.local_port}")
         if not self.name:
             raise ValueError("name cannot be empty")
-        if not self.api_provider_id:
-            raise ValueError("api_provider_id cannot be empty")
-        if not isinstance(self.upstream, UpstreamProxy):
-            raise TypeError("upstream must be an UpstreamProxy instance")
+        
+        # 如果有上游代理，验证其类型
+        if self.upstream is not None and not isinstance(self.upstream, UpstreamProxy):
+            raise TypeError("upstream must be an UpstreamProxy instance or None")
+        
+        # 如果启用监控但没有上游代理，禁用监控
+        if self.monitoring_enabled and self.upstream is None:
+            raise ValueError("monitoring cannot be enabled for direct mode proxies")
 
 
 @dataclass
@@ -204,10 +211,16 @@ class Config:
         if len(provider_ids) != len(set(provider_ids)):
             raise ValueError("duplicate id found in api_providers")
         
-        # 验证所有代理引用的API提供商存在
+        # 验证所有代理引用的API提供商存在（如果指定了 API 提供商）
         for proxy in self.proxies:
-            if proxy.api_provider_id not in provider_ids:
+            if proxy.api_provider_id is not None and proxy.api_provider_id not in provider_ids:
                 raise ValueError(f"proxy {proxy.name} references non-existent api_provider_id: {proxy.api_provider_id}")
+            
+            # 如果没有上游代理也没有 API 提供商，这是 direct 模式，允许
+            # 如果有 API 提供商但没有上游代理，这是 API 模式，允许
+            # 如果有上游代理，验证其类型
+            if proxy.upstream is not None and not isinstance(proxy.upstream, UpstreamProxy):
+                raise TypeError(f"proxy {proxy.name} upstream must be an UpstreamProxy instance or None")
 
 
 @dataclass

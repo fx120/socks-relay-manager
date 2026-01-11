@@ -7,6 +7,7 @@ Web API 模块
 import logging
 import asyncio
 import json
+import subprocess
 from typing import Optional, List
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, status, Request
@@ -47,9 +48,12 @@ class ProxyConfigModel(BaseModel):
     """代理配置模型"""
     local_port: int = Field(ge=1024, le=65535)
     name: str
-    api_provider_id: str
-    upstream: UpstreamProxyModel
+    api_provider_id: Optional[str] = None  # 可选，仅在使用 API 获取上游代理时需要
+    upstream: Optional[UpstreamProxyModel] = None  # 可选，如果为 None 则使用 direct 模式
     monitoring_enabled: bool = False
+    # SOCKS5 本地认证配置（可选）
+    local_username: Optional[str] = None
+    local_password: Optional[str] = None
 
 
 class ResponseFormatModel(BaseModel):
@@ -87,6 +91,8 @@ class ProxyUpdateModel(BaseModel):
     api_provider_id: Optional[str] = None
     upstream: Optional[UpstreamProxyModel] = None
     monitoring_enabled: Optional[bool] = None
+    local_username: Optional[str] = None
+    local_password: Optional[str] = None
 
 
 class APIProviderUpdateModel(BaseModel):
@@ -220,6 +226,11 @@ class WebAPI:
         self.app.get("/api/system/logs", dependencies=[Depends(self.auth_dependency)])(self.get_logs)
         self.app.get("/api/history", dependencies=[Depends(self.auth_dependency)])(self.get_history)
         
+        # sing-box 服务管理路由
+        self.app.post("/api/system/singbox/start", dependencies=[Depends(self.auth_dependency)])(self.start_singbox)
+        self.app.post("/api/system/singbox/stop", dependencies=[Depends(self.auth_dependency)])(self.stop_singbox)
+        self.app.post("/api/system/singbox/restart", dependencies=[Depends(self.auth_dependency)])(self.restart_singbox)
+        
         # 配置管理路由
         self.app.get("/api/config", dependencies=[Depends(self.auth_dependency)])(self.get_config)
         self.app.put("/api/config", dependencies=[Depends(self.auth_dependency)])(self.update_config)
@@ -298,9 +309,11 @@ class WebAPI:
                         "username": proxy.upstream.username,
                         "password": proxy.upstream.password,
                         "protocol": proxy.upstream.protocol
-                    },
+                    } if proxy.upstream else None,
                     "monitoring_enabled": proxy.monitoring_enabled,
-                    "monitoring_status": None
+                    "monitoring_status": None,
+                    "local_username": proxy.local_username,
+                    "local_password": proxy.local_password
                 }
                 
                 if monitoring_status:
@@ -346,29 +359,35 @@ class WebAPI:
                         detail=f"Proxy with port {proxy.local_port} already exists"
                     )
             
-            # 检查API提供商是否存在
-            provider_exists = any(p.id == proxy.api_provider_id for p in config.api_providers)
-            if not provider_exists:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"API provider '{proxy.api_provider_id}' not found"
+            # 如果指定了 API 提供商，检查其是否存在
+            if proxy.api_provider_id:
+                provider_exists = any(p.id == proxy.api_provider_id for p in config.api_providers)
+                if not provider_exists:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"API provider '{proxy.api_provider_id}' not found"
+                    )
+            
+            # 创建上游代理配置（如果提供）
+            upstream = None
+            if proxy.upstream:
+                upstream = UpstreamProxy(
+                    server=proxy.upstream.server,
+                    port=proxy.upstream.port,
+                    username=proxy.upstream.username,
+                    password=proxy.upstream.password,
+                    protocol=proxy.upstream.protocol
                 )
             
             # 创建新的代理配置
-            upstream = UpstreamProxy(
-                server=proxy.upstream.server,
-                port=proxy.upstream.port,
-                username=proxy.upstream.username,
-                password=proxy.upstream.password,
-                protocol=proxy.upstream.protocol
-            )
-            
             new_proxy = ProxyConfig(
                 local_port=proxy.local_port,
                 name=proxy.name,
                 api_provider_id=proxy.api_provider_id,
                 upstream=upstream,
-                monitoring_enabled=proxy.monitoring_enabled
+                monitoring_enabled=proxy.monitoring_enabled,
+                local_username=proxy.local_username,
+                local_password=proxy.local_password
             )
             
             # 添加到配置
@@ -378,23 +397,42 @@ class WebAPI:
             self.config_manager.save_config(config)
             
             # 应用sing-box配置
-            self.proxy_manager.apply_singbox_config()
+            try:
+                self.proxy_manager.apply_singbox_config()
+                logger.info(f"sing-box configuration applied successfully for proxy {proxy.name}")
+            except Exception as apply_error:
+                # 配置应用失败，回滚
+                logger.error(f"Failed to apply sing-box config: {apply_error}")
+                config.proxies.remove(new_proxy)
+                self.config_manager.save_config(config)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to apply sing-box configuration: {str(apply_error)}"
+                )
             
             logger.info(f"Created proxy: {proxy.name} (port {proxy.local_port})")
             
-            return {
+            # 构建返回数据
+            result = {
                 "local_port": new_proxy.local_port,
                 "name": new_proxy.name,
                 "api_provider_id": new_proxy.api_provider_id,
-                "upstream": {
+                "upstream": None,
+                "monitoring_enabled": new_proxy.monitoring_enabled,
+                "local_username": new_proxy.local_username,
+                "local_password": "***" if new_proxy.local_password else None
+            }
+            
+            if new_proxy.upstream:
+                result["upstream"] = {
                     "server": new_proxy.upstream.server,
                     "port": new_proxy.upstream.port,
                     "username": new_proxy.upstream.username,
-                    "password": new_proxy.upstream.password,
+                    "password": "***" if new_proxy.upstream.password else None,
                     "protocol": new_proxy.upstream.protocol
-                },
-                "monitoring_enabled": new_proxy.monitoring_enabled
-            }
+                }
+            
+            return result
             
         except HTTPException:
             raise
@@ -437,9 +475,11 @@ class WebAPI:
                     "username": proxy_config.upstream.username,
                     "password": proxy_config.upstream.password,
                     "protocol": proxy_config.upstream.protocol
-                },
+                } if proxy_config.upstream else None,
                 "monitoring_enabled": proxy_config.monitoring_enabled,
-                "monitoring_status": None
+                "monitoring_status": None,
+                "local_username": proxy_config.local_username,
+                "local_password": proxy_config.local_password
             }
             
             if monitoring_status:
@@ -535,8 +575,10 @@ class WebAPI:
                     "username": proxy_config.upstream.username,
                     "password": proxy_config.upstream.password,
                     "protocol": proxy_config.upstream.protocol
-                },
-                "monitoring_enabled": proxy_config.monitoring_enabled
+                } if proxy_config.upstream else None,
+                "monitoring_enabled": proxy_config.monitoring_enabled,
+                "local_username": proxy_config.local_username,
+                "local_password": proxy_config.local_password
             }
             
         except HTTPException:
@@ -877,6 +919,9 @@ class WebAPI:
             # 获取最近的切换历史
             recent_switches = self.database.get_switch_history(limit=5)
             
+            # 检查 sing-box 服务状态
+            singbox_status = self._check_singbox_status()
+            
             return {
                 "status": "running",
                 "total_proxies": total_proxies,
@@ -884,6 +929,7 @@ class WebAPI:
                 "healthy_proxies": healthy_proxies,
                 "unhealthy_proxies": unhealthy_proxies,
                 "recent_switches": len(recent_switches),
+                "singbox": singbox_status,
                 "config": {
                     "web_port": config.system.web_port,
                     "log_level": config.system.log_level,
@@ -991,6 +1037,261 @@ class WebAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get history: {str(e)}"
+            )
+    
+    # ==================== sing-box 服务管理端点 ====================
+    
+    def _check_singbox_status(self):
+        """
+        检查 sing-box 服务状态
+        
+        Returns:
+            dict: sing-box 服务状态信息
+        """
+        try:
+            # 检查 systemd 服务状态 - 使用 returncode 判断更可靠
+            result = subprocess.run(
+                ["sudo", "systemctl", "is-active", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # returncode 0 表示 active，非 0 表示 inactive
+            is_active = result.returncode == 0
+            status_text = result.stdout.strip()
+            
+            logger.info(f"sing-box status check: returncode={result.returncode}, is_active={is_active}, output='{status_text}'")
+            
+            # 如果有 stderr 输出，可能是权限问题
+            if result.stderr.strip():
+                logger.warning(f"sing-box status check stderr: {result.stderr.strip()}")
+            
+            # 获取版本信息
+            version_result = subprocess.run(
+                ["sing-box", "version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            version = version_result.stdout.strip().split('\n')[0] if version_result.returncode == 0 else "unknown"
+            
+            status_dict = {
+                "running": is_active,
+                "status": status_text if status_text else ("active" if is_active else "inactive"),
+                "version": version,
+                "enabled": self._is_singbox_enabled()
+            }
+            
+            logger.info(f"sing-box status result: {status_dict}")
+            return status_dict
+            
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout checking sing-box status")
+            return {
+                "running": False,
+                "status": "unknown",
+                "version": "unknown",
+                "enabled": False,
+                "error": "Timeout"
+            }
+        except PermissionError as e:
+            logger.error(f"Permission denied checking sing-box status: {e}")
+            return {
+                "running": False,
+                "status": "error",
+                "version": "unknown",
+                "enabled": False,
+                "error": "Permission denied - sudo configuration may be missing"
+            }
+        except Exception as e:
+            logger.error(f"Failed to check sing-box status: {e}")
+            return {
+                "running": False,
+                "status": "error",
+                "version": "unknown",
+                "enabled": False,
+                "error": str(e)
+            }
+    
+    def _is_singbox_enabled(self):
+        """检查 sing-box 服务是否设置为开机自启"""
+        try:
+            result = subprocess.run(
+                ["sudo", "systemctl", "is-enabled", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # returncode 0 表示 enabled
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    async def start_singbox(self):
+        """
+        启动 sing-box 服务
+        
+        Returns:
+            dict: 操作结果
+        """
+        try:
+            logger.info("Starting sing-box service...")
+            result = subprocess.run(
+                ["sudo", "systemctl", "start", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                # 等待一下让服务启动
+                await asyncio.sleep(2)
+                
+                # 检查服务状态
+                status = self._check_singbox_status()
+                
+                if status["running"]:
+                    logger.info("sing-box service started successfully")
+                    return {
+                        "message": "sing-box 服务启动成功",
+                        "success": True,
+                        "status": status
+                    }
+                else:
+                    logger.error("sing-box service failed to start")
+                    return {
+                        "message": "sing-box 服务启动失败",
+                        "success": False,
+                        "status": status,
+                        "error": "Service did not become active"
+                    }
+            else:
+                error_msg = result.stderr or "Unknown error"
+                logger.error(f"Failed to start sing-box: {error_msg}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"启动失败: {error_msg}"
+                )
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout starting sing-box service")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="启动超时"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to start sing-box: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"启动失败: {str(e)}"
+            )
+    
+    async def stop_singbox(self):
+        """
+        停止 sing-box 服务
+        
+        Returns:
+            dict: 操作结果
+        """
+        try:
+            logger.info("Stopping sing-box service...")
+            result = subprocess.run(
+                ["sudo", "systemctl", "stop", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                logger.info("sing-box service stopped successfully")
+                return {
+                    "message": "sing-box 服务已停止",
+                    "success": True
+                }
+            else:
+                error_msg = result.stderr or "Unknown error"
+                logger.error(f"Failed to stop sing-box: {error_msg}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"停止失败: {error_msg}"
+                )
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout stopping sing-box service")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="停止超时"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to stop sing-box: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"停止失败: {str(e)}"
+            )
+    
+    async def restart_singbox(self):
+        """
+        重启 sing-box 服务
+        
+        Returns:
+            dict: 操作结果
+        """
+        try:
+            logger.info("Restarting sing-box service...")
+            result = subprocess.run(
+                ["sudo", "systemctl", "restart", "sing-box"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                # 等待一下让服务重启
+                await asyncio.sleep(2)
+                
+                # 检查服务状态
+                status = self._check_singbox_status()
+                
+                if status["running"]:
+                    logger.info("sing-box service restarted successfully")
+                    return {
+                        "message": "sing-box 服务重启成功",
+                        "success": True,
+                        "status": status
+                    }
+                else:
+                    logger.error("sing-box service failed to restart")
+                    return {
+                        "message": "sing-box 服务重启失败",
+                        "success": False,
+                        "status": status,
+                        "error": "Service did not become active"
+                    }
+            else:
+                error_msg = result.stderr or "Unknown error"
+                logger.error(f"Failed to restart sing-box: {error_msg}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"重启失败: {error_msg}"
+                )
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout restarting sing-box service")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="重启超时"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to restart sing-box: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"重启失败: {str(e)}"
             )
     
     # ==================== 配置管理端点 ====================

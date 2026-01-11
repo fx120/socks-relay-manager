@@ -203,15 +203,15 @@ class ConfigManager:
                         errors.append(f"duplicate local_port: {proxy.local_port}")
                     ports.add(proxy.local_port)
                     
-                    # 验证上游代理
-                    if not isinstance(proxy.upstream, UpstreamProxy):
-                        errors.append(f"proxies[{i}].upstream must be an UpstreamProxy instance")
-                    else:
-                        if not (1 <= proxy.upstream.port <= 65535):
+                    # 验证上游代理（如果存在）
+                    if proxy.upstream is not None:
+                        if not isinstance(proxy.upstream, UpstreamProxy):
+                            errors.append(f"proxies[{i}].upstream must be an UpstreamProxy instance or None")
+                        elif not (1 <= proxy.upstream.port <= 65535):
                             errors.append(f"proxies[{i}].upstream.port must be between 1 and 65535")
                     
-                    # 验证API提供商引用
-                    if hasattr(config, 'api_providers'):
+                    # 验证API提供商引用（仅当指定了 API 提供商时）
+                    if hasattr(config, 'api_providers') and proxy.api_provider_id is not None:
                         provider_ids_list = [p.id for p in config.api_providers]
                         if proxy.api_provider_id not in provider_ids_list:
                             errors.append(f"proxies[{i}].api_provider_id '{proxy.api_provider_id}' not found in api_providers")
@@ -339,21 +339,26 @@ class ConfigManager:
         # 解析代理配置
         proxies = []
         for proxy_data in data.get('proxies', []):
-            upstream_data = proxy_data['upstream']
-            upstream = UpstreamProxy(
-                server=upstream_data['server'],
-                port=upstream_data['port'],
-                username=upstream_data.get('username'),
-                password=upstream_data.get('password'),
-                protocol=upstream_data.get('protocol', 'socks5')
-            )
+            # 解析上游代理（可选）
+            upstream = None
+            if proxy_data.get('upstream'):
+                upstream_data = proxy_data['upstream']
+                upstream = UpstreamProxy(
+                    server=upstream_data['server'],
+                    port=upstream_data['port'],
+                    username=upstream_data.get('username'),
+                    password=upstream_data.get('password'),
+                    protocol=upstream_data.get('protocol', 'socks5')
+                )
             
             proxy = ProxyConfig(
                 local_port=proxy_data['local_port'],
                 name=proxy_data['name'],
-                api_provider_id=proxy_data['api_provider_id'],
+                api_provider_id=proxy_data.get('api_provider_id'),
                 upstream=upstream,
-                monitoring_enabled=proxy_data.get('monitoring_enabled', False)
+                monitoring_enabled=proxy_data.get('monitoring_enabled', False),
+                local_username=proxy_data.get('local_username'),
+                local_password=proxy_data.get('local_password')
             )
             proxies.append(proxy)
         
@@ -430,8 +435,10 @@ class ConfigManager:
                         'username': proxy.upstream.username,
                         'password': proxy.upstream.password,
                         'protocol': proxy.upstream.protocol
-                    },
-                    'monitoring_enabled': proxy.monitoring_enabled
+                    } if proxy.upstream else None,
+                    'monitoring_enabled': proxy.monitoring_enabled,
+                    'local_username': proxy.local_username,
+                    'local_password': proxy.local_password
                 }
                 for proxy in config.proxies
             ]

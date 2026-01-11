@@ -82,7 +82,7 @@ install_singbox() {
 
     log_info "安装 sing-box..."
     
-    SINGBOX_VERSION="1.8.0"
+    SINGBOX_VERSION="1.12.15"
     ARCH=$(uname -m)
     
     case $ARCH in
@@ -333,6 +333,12 @@ create_systemd_services() {
         fi
     fi
     
+    # 确保端口不为空
+    if [ -z "$WEB_PORT" ]; then
+        log_error "无法确定 Web 端口，使用默认端口 8080"
+        WEB_PORT=8080
+    fi
+    
     log_info "配置 Web 端口: $WEB_PORT"
     
     # proxy-relay 服务
@@ -354,7 +360,7 @@ Restart=on-failure
 RestartSec=5s
 
 # 安全加固
-NoNewPrivileges=true
+# NoNewPrivileges=true  # 禁用以允许 sudo 调用管理 sing-box
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
@@ -404,6 +410,36 @@ EOF
     log_info "systemd 服务创建完成"
 }
 
+# 设置 sudo 权限
+setup_sudo_permissions() {
+    log_info "设置 sudo 权限..."
+    
+    SUDOERS_FILE="/etc/sudoers.d/proxy-relay"
+    
+    # 创建 sudoers 配置文件
+    cat > "$SUDOERS_FILE" << 'SUDOEOF'
+# Allow proxy-relay user to manage sing-box service without password
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl start sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl stop sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl restart sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl status sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl is-active sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled sing-box
+SUDOEOF
+    
+    # 设置正确的权限
+    chmod 0440 "$SUDOERS_FILE"
+    
+    # 验证 sudoers 文件语法
+    if visudo -c -f "$SUDOERS_FILE" > /dev/null 2>&1; then
+        log_info "✓ sudo 权限配置完成"
+    else
+        log_error "✗ sudoers 配置语法错误，已删除"
+        rm -f "$SUDOERS_FILE"
+        return 1
+    fi
+}
+
 # 启用并启动服务
 start_services() {
     log_info "启用服务..."
@@ -421,7 +457,7 @@ start_services() {
     sleep 5
     
     # 检查配置文件是否生成
-    if [ -f "/etc/proxy-relay/sing-box.json" ]; then
+    if [ -f "/etc/sing-box/config.json" ]; then
         log_info "启动 sing-box..."
         systemctl start sing-box
     else
@@ -554,6 +590,7 @@ main() {
     install_python_deps
     configure_system
     create_systemd_services
+    setup_sudo_permissions
     start_services
     verify_deployment
     show_info

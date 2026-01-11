@@ -65,6 +65,98 @@
         </div>
     </div>
     
+    <!-- sing-box Service Status Card -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <h3 class="text-lg font-semibold text-gray-800">sing-box 服务状态</h3>
+            <button 
+                @click="loadSystemStatus()"
+                class="text-gray-500 hover:text-gray-700"
+                title="刷新状态"
+            >
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+        <div class="p-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div 
+                        class="w-16 h-16 rounded-full flex items-center justify-center"
+                        :class="systemStatus.singbox?.running ? 'bg-green-100' : 'bg-red-100'"
+                    >
+                        <i 
+                            class="text-3xl"
+                            :class="systemStatus.singbox?.running ? 'fas fa-check-circle text-green-600' : 'fas fa-times-circle text-red-600'"
+                        ></i>
+                    </div>
+                    <div>
+                        <p class="text-lg font-semibold text-gray-800">
+                            <span x-text="systemStatus.singbox?.running ? '运行中' : '未运行'"></span>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            状态: <span x-text="systemStatus.singbox?.status || 'unknown'"></span>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            版本: <span x-text="systemStatus.singbox?.version || 'unknown'"></span>
+                        </p>
+                        <template x-if="systemStatus.singbox?.enabled">
+                            <p class="text-xs text-green-600 mt-1">
+                                <i class="fas fa-check mr-1"></i>开机自启已启用
+                            </p>
+                        </template>
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    <template x-if="!systemStatus.singbox?.running">
+                        <button 
+                            @click="startSingbox()"
+                            :disabled="singboxLoading"
+                            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i class="fas fa-play mr-2"></i>
+                            <span x-show="!singboxLoading">启动</span>
+                            <span x-show="singboxLoading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </span>
+                        </button>
+                    </template>
+                    <template x-if="systemStatus.singbox?.running">
+                        <button 
+                            @click="stopSingbox()"
+                            :disabled="singboxLoading"
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i class="fas fa-stop mr-2"></i>
+                            <span x-show="!singboxLoading">停止</span>
+                            <span x-show="singboxLoading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </span>
+                        </button>
+                        <button 
+                            @click="restartSingbox()"
+                            :disabled="singboxLoading"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i class="fas fa-redo mr-2"></i>
+                            <span x-show="!singboxLoading">重启</span>
+                            <span x-show="singboxLoading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+            <template x-if="systemStatus.singbox?.error">
+                <div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p class="text-sm text-red-600">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        <span x-text="systemStatus.singbox.error"></span>
+                    </p>
+                </div>
+            </template>
+        </div>
+    </div>
+    
     <!-- Proxy Status Table -->
     <div class="bg-white rounded-lg shadow mb-6">
         <div class="px-6 py-4 border-b border-gray-200">
@@ -217,6 +309,7 @@ function dashboardData() {
         systemStatus: {},
         proxies: [],
         history: [],
+        singboxLoading: false,
         
         async init() {
             await this.loadSystemStatus();
@@ -266,6 +359,83 @@ function dashboardData() {
             }
         },
         
+        async startSingbox() {
+            this.singboxLoading = true;
+            try {
+                const response = await fetch('/api/system/singbox/start', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.notify(data.message || 'sing-box 服务启动成功', 'success');
+                    await this.loadSystemStatus();
+                } else {
+                    const error = await response.json();
+                    this.notify(error.detail || '启动失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to start sing-box:', error);
+                this.notify('启动失败', 'error');
+            } finally {
+                this.singboxLoading = false;
+            }
+        },
+        
+        async stopSingbox() {
+            if (!confirm('确定要停止 sing-box 服务吗？这将中断所有代理连接。')) {
+                return;
+            }
+            
+            this.singboxLoading = true;
+            try {
+                const response = await fetch('/api/system/singbox/stop', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.notify(data.message || 'sing-box 服务已停止', 'success');
+                    await this.loadSystemStatus();
+                } else {
+                    const error = await response.json();
+                    this.notify(error.detail || '停止失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to stop sing-box:', error);
+                this.notify('停止失败', 'error');
+            } finally {
+                this.singboxLoading = false;
+            }
+        },
+        
+        async restartSingbox() {
+            if (!confirm('确定要重启 sing-box 服务吗？这将短暂中断所有代理连接。')) {
+                return;
+            }
+            
+            this.singboxLoading = true;
+            try {
+                const response = await fetch('/api/system/singbox/restart', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.notify(data.message || 'sing-box 服务重启成功', 'success');
+                    await this.loadSystemStatus();
+                } else {
+                    const error = await response.json();
+                    this.notify(error.detail || '重启失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to restart sing-box:', error);
+                this.notify('重启失败', 'error');
+            } finally {
+                this.singboxLoading = false;
+            }
+        },
+        
         formatTime(timestamp) {
             if (!timestamp) return '-';
             const date = new Date(timestamp);
@@ -286,6 +456,12 @@ function dashboardData() {
                 'api_error': 'API错误'
             };
             return reasons[reason] || reason;
+        },
+        
+        notify(message, type = 'success') {
+            window.dispatchEvent(new CustomEvent('notify', {
+                detail: { message, type }
+            }));
         }
     };
 }

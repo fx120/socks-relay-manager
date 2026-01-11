@@ -35,7 +35,7 @@ SYSTEMD_DIR="/etc/systemd/system"
 # Minimum versions
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
-SINGBOX_VERSION="1.8.0"
+SINGBOX_VERSION="1.12.15"
 
 # Function to print colored messages
 print_info() {
@@ -514,6 +514,36 @@ EOF
     print_info "✓ Systemd daemon reloaded"
 }
 
+# Function to setup sudo permissions
+setup_sudo_permissions() {
+    print_step "Setting up sudo permissions..."
+    
+    SUDOERS_FILE="/etc/sudoers.d/proxy-relay"
+    
+    # Create sudoers configuration file
+    cat > "$SUDOERS_FILE" << 'SUDOEOF'
+# Allow proxy-relay user to manage sing-box service without password
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl start sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl stop sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl restart sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl status sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl is-active sing-box
+proxy-relay ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled sing-box
+SUDOEOF
+    
+    # Set correct permissions
+    chmod 0440 "$SUDOERS_FILE"
+    
+    # Verify sudoers file syntax
+    if visudo -c -f "$SUDOERS_FILE" > /dev/null 2>&1; then
+        print_info "✓ sudo permissions configured"
+    else
+        print_error "✗ sudoers configuration syntax error, removed"
+        rm -f "$SUDOERS_FILE"
+        return 1
+    fi
+}
+
 # Function to enable and optionally start service
 enable_service() {
     print_step "Enabling service..."
@@ -654,6 +684,7 @@ main() {
     # Configure system
     setup_configuration
     install_systemd_service
+    setup_sudo_permissions
     enable_service
     
     # Post-installation

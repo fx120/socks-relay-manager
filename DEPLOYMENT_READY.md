@@ -8,9 +8,10 @@
 - ✅ 包含完整的源代码、文档和部署工具
 
 ### 2. 部署包
-- ✅ 已创建部署包：`proxy-relay-deploy.tar.gz` (133KB)
+- ✅ 已创建部署包：`proxy-relay-deploy.tar.gz` (134KB) - **已修复 app 导出问题**
 - ✅ 包含所有必要的文件（源代码、脚本、文档）
 - ✅ 已排除开发文件（.git, .venv, __pycache__ 等）
+- ⚠️ **重要更新**：修复了 `web_api.py` 缺少 `app` 导出的问题
 
 ### 3. 部署工具
 - ✅ `scripts/deploy.sh` - 自动部署脚本
@@ -19,6 +20,7 @@
 - ✅ `scripts/production_test.sh` - 生产环境测试
 
 ### 4. 完整文档
+- ✅ `SERVER_FIX.md` - **服务器端快速修复指南（针对你遇到的问题）**
 - ✅ `DEPLOY_TO_SERVER.md` - 详细部署指南
 - ✅ `QUICK_REFERENCE.md` - 快速参考卡片
 - ✅ `docs/DEPLOYMENT.md` - 完整部署文档
@@ -28,6 +30,26 @@
 ## 📦 现在你有的文件
 
 在当前目录下：
+```
+proxy-relay-deploy.tar.gz  (134KB) - 部署包（已修复）
+SERVER_FIX.md                      - 服务器端快速修复指南 ⭐
+DEPLOY_TO_SERVER.md                - 部署指南
+QUICK_REFERENCE.md                 - 快速参考
+DEPLOYMENT_READY.md                - 本文件
+```
+
+## ⚠️ 重要提示
+
+**如果你已经在服务器上部署过并遇到了 "Attribute app not found" 错误：**
+
+请查看 **`SERVER_FIX.md`** 文件，里面有三种快速修复方案：
+1. 重新部署（推荐）
+2. 只更新 web_api.py 文件（快速）
+3. 从 GitHub 克隆最新代码
+
+**如果是首次部署：**
+
+直接使用新的 `proxy-relay-deploy.tar.gz` 部署包即可，问题已修复。
 ```
 proxy-relay-deploy.tar.gz  (133KB) - 部署包
 DEPLOY_TO_SERVER.md                - 部署指南

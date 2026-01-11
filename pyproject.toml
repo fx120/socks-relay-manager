@@ -1,0 +1,56 @@
+[tool.poetry]
+name = "proxy-relay"
+version = "0.1.0"
+description = "SOCKS5 proxy relay system with automatic health monitoring and switching"
+authors = ["Proxy Relay Team"]
+readme = "README.md"
+packages = [{include = "proxy_relay", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pyyaml = "^6.0.1"
+requests = "^2.31.0"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+python-multipart = "^0.0.6"
+bcrypt = "^4.1.2"
+pydantic = "^2.10.0"
+pydantic-settings = "^2.1.0"
+click = "^8.1.7"
+httpx = "^0.26.0"
+jinja2 = "^3.1.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.3"
+pytest-mock = "^3.12.0"
+pytest-cov = "^4.1.0"
+hypothesis = "^6.96.1"
+requests-mock = "^1.11.0"
+black = "^24.1.1"
+ruff = "^0.1.14"
+
+[tool.poetry.scripts]
+proxy-relay = "proxy_relay.cli:main"
+proxy-relay-cli = "proxy_relay.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=proxy_relay --cov-report=term-missing"
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

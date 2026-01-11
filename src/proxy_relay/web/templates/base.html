@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="{ sidebarOpen: true }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}代理中转系统{% endblock %}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <aside 
+            x-show="sidebarOpen" 
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="-translate-x-full"
+            x-transition:enter-end="translate-x-0"
+            x-transition:leave="transition ease-in duration-150"
+            x-transition:leave-start="translate-x-0"
+            x-transition:leave-end="-translate-x-full"
+            class="w-64 bg-gray-800 text-white flex-shrink-0"
+        >
+            <div class="p-4">
+                <h1 class="text-2xl font-bold mb-8">
+                    <i class="fas fa-network-wired mr-2"></i>
+                    代理中转系统
+                </h1>
+                
+                <nav class="space-y-2">
+                    <a href="/" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-dashboard w-5"></i>
+                        <span class="ml-3">仪表板</span>
+                    </a>
+                    
+                    <a href="/proxies" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/proxies' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-server w-5"></i>
+                        <span class="ml-3">代理管理</span>
+                    </a>
+                    
+                    <a href="/monitoring" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/monitoring' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-heartbeat w-5"></i>
+                        <span class="ml-3">监控控制</span>
+                    </a>
+                    
+                    <a href="/history" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/history' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-history w-5"></i>
+                        <span class="ml-3">历史记录</span>
+                    </a>
+                    
+                    <a href="/api-providers" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/api-providers' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-plug w-5"></i>
+                        <span class="ml-3">API提供商</span>
+                    </a>
+                    
+                    <a href="/settings" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/settings' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-cog w-5"></i>
+                        <span class="ml-3">系统设置</span>
+                    </a>
+                </nav>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Top Bar -->
+            <header class="bg-white shadow-sm z-10">
+                <div class="flex items-center justify-between px-6 py-4">
+                    <button 
+                        @click="sidebarOpen = !sidebarOpen"
+                        class="text-gray-600 hover:text-gray-900 focus:outline-none"
+                    >
+                        <i class="fas fa-bars text-xl"></i>
+                    </button>
+                    
+                    <div class="flex items-center space-x-4">
+                        <div class="text-sm text-gray-600">
+                            <i class="fas fa-user-circle mr-2"></i>
+                            <span>管理员</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Page Content -->
+            <main class="flex-1 overflow-y-auto p-6">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div 
+        x-data="{ show: false, message: '', type: 'success' }"
+        @notify.window="show = true; message = $event.detail.message; type = $event.detail.type || 'success'; setTimeout(() => show = false, 3000)"
+        x-show="show"
+        x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 transform translate-y-2"
+        x-transition:enter-end="opacity-100 transform translate-y-0"
+        x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0"
+        class="fixed bottom-4 right-4 z-50"
+        x-cloak
+    >
+        <div 
+            class="px-6 py-4 rounded-lg shadow-lg"
+            :class="{
+                'bg-green-500 text-white': type === 'success',
+                'bg-red-500 text-white': type === 'error',
+                'bg-yellow-500 text-white': type === 'warning',
+                'bg-blue-500 text-white': type === 'info'
+            }"
+        >
+            <div class="flex items-center">
+                <i class="fas mr-3" :class="{
+                    'fa-check-circle': type === 'success',
+                    'fa-exclamation-circle': type === 'error',
+                    'fa-exclamation-triangle': type === 'warning',
+                    'fa-info-circle': type === 'info'
+                }"></i>
+                <span x-text="message"></span>
+            </div>
+        </div>
+    </div>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

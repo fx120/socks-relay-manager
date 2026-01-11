@@ -1,0 +1,67 @@
+# 代理中转系统配置文件示例
+# 复制此文件为 config.yaml 并根据需要修改
+
+system:
+  web_port: 8080
+  web_auth:
+    enabled: true
+    username: admin
+    password_hash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzS7OfgOm6"  # 密码: admin123
+  log_level: INFO
+  log_file: /var/log/proxy-relay/app.log
+  database: /var/lib/proxy-relay/data.db
+
+monitoring:
+  check_interval: 30  # 健康检查间隔（秒）
+  failure_threshold: 3  # 触发切换的连续失败次数
+  check_timeout: 10  # 健康检查超时（秒）
+  check_url: "http://www.google.com"  # 健康检查URL
+
+# API提供商配置
+api_providers:
+  - id: "91http"
+    name: "91HTTP"
+    enabled: true
+    endpoint: "https://api.91http.com/v1/get-ip"
+    method: "GET"
+    params:
+      trade_no: "YOUR_TRADE_NO"  # 替换为你的订单号
+      secret: "YOUR_SECRET"  # 替换为你的密钥
+      num: "1"
+      format: "json"
+      protocol: "socks5"
+    timeout: 10
+    retry_attempts: 3
+    retry_backoff: 2
+    response_format:
+      type: "91http"
+      success_code: 0
+      data_path: "data.proxy_list"
+      ip_field: "ip"
+      port_field: "port"
+      username_field: null
+      password_field: null
+
+# 代理配置
+proxies:
+  - local_port: 1080
+    name: "代理端口1"
+    api_provider_id: "91http"
+    upstream:
+      server: "proxy1.example.com"
+      port: 10000
+      username: null
+      password: null
+      protocol: "socks5"
+    monitoring_enabled: false
+  
+  - local_port: 1081
+    name: "代理端口2"
+    api_provider_id: "91http"
+    upstream:
+      server: "proxy2.example.com"
+      port: 10001
+      username: null
+      password: null
+      protocol: "socks5"
+    monitoring_enabled: true

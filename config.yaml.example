@@ -1,0 +1,210 @@
+# ============================================================================
+# 代理中转系统配置文件
+# ============================================================================
+# 
+# 这是配置文件示例，包含所有可用的配置选项和说明。
+# 复制此文件为 config.yaml 并根据实际需求修改。
+#
+# 配置文件位置：
+#   - 开发环境：./config.yaml 或 dev/etc/proxy-relay/config.yaml
+#   - 生产环境：/etc/proxy-relay/config.yaml
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 系统配置
+# ----------------------------------------------------------------------------
+system:
+  # Web管理界面端口
+  web_port: 8080
+  
+  # Web界面认证配置
+  web_auth:
+    enabled: true  # 是否启用认证
+    username: admin  # 管理员用户名
+    # 密码哈希值（使用bcrypt）
+    # 默认密码: admin
+    # 生成新密码哈希: python -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
+    password_hash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWeCrm4u"
+  
+  # 日志配置
+  log_level: INFO  # 日志级别: DEBUG, INFO, WARN, ERROR
+  log_file: /var/log/proxy-relay/app.log  # 日志文件路径
+  log_max_size: 104857600  # 日志文件最大大小（字节，默认100MB）
+  log_backup_count: 5  # 保留的日志文件数量
+  
+  # 数据库配置
+  database: /var/lib/proxy-relay/data.db  # SQLite数据库文件路径
+
+# ----------------------------------------------------------------------------
+# 监控配置
+# ----------------------------------------------------------------------------
+monitoring:
+  # 健康检查间隔（秒）
+  # 建议值: 30-60秒，过短会增加系统负载
+  check_interval: 30
+  
+  # 触发代理切换的连续失败次数阈值
+  # 建议值: 3-5次，避免因偶发性网络问题导致频繁切换
+  failure_threshold: 3
+  
+  # 健康检查请求超时时间（秒）
+  # 建议值: 5-10秒
+  check_timeout: 10
+  
+  # 健康检查URL
+  # 建议使用稳定的公共网站，如 Google、Cloudflare 等
+  check_url: "http://www.google.com"
+
+# ----------------------------------------------------------------------------
+# API提供商配置
+# ----------------------------------------------------------------------------
+# 支持配置多个API提供商，系统会按顺序尝试获取代理
+api_providers:
+  # 91HTTP API提供商示例
+  - id: "91http"  # 唯一标识符
+    name: "91HTTP"  # 显示名称
+    enabled: true  # 是否启用此提供商
+    
+    # API端点配置
+    endpoint: "https://api.91http.com/v1/get-ip"
+    method: "GET"  # HTTP方法: GET 或 POST
+    
+    # 请求参数（GET方法为查询参数，POST方法为请求体）
+    params:
+      trade_no: "YOUR_TRADE_NO"  # ⚠️ 替换为你的91HTTP订单号
+      secret: "YOUR_SECRET"      # ⚠️ 替换为你的91HTTP密钥
+      num: "1"                   # 每次获取的代理数量
+      format: "json"             # 响应格式
+      protocol: "socks5"         # 代理协议
+    
+    # 请求超时和重试配置
+    timeout: 10          # 请求超时（秒）
+    retry_attempts: 3    # 失败后重试次数
+    retry_backoff: 2     # 重试退避倍数（指数退避）
+    
+    # API响应格式配置
+    response_format:
+      type: "91http"              # 预定义格式类型
+      success_code: 0             # 成功状态码
+      data_path: "data.proxy_list"  # 代理列表在响应中的路径
+      ip_field: "ip"              # IP地址字段名
+      port_field: "port"          # 端口字段名
+      username_field: null        # 用户名字段（null表示不需要）
+      password_field: null        # 密码字段（null表示不需要）
+  
+  # 自定义API提供商示例（已禁用）
+  - id: "custom_provider"
+    name: "自定义提供商"
+    enabled: false  # 设置为true以启用
+    
+    endpoint: "https://api.example.com/proxy"
+    method: "POST"
+    
+    # POST请求的请求头
+    headers:
+      Authorization: "Bearer YOUR_API_TOKEN"
+      Content-Type: "application/json"
+    
+    # POST请求体
+    body:
+      type: "socks5"
+      count: 1
+    
+    timeout: 10
+    retry_attempts: 3
+    retry_backoff: 2
+    
+    # 自定义响应格式
+    response_format:
+      type: "custom"
+      success_field: "success"    # 成功标志字段
+      success_value: true          # 成功标志值
+      data_path: "data"            # 数据路径
+      ip_field: "host"             # IP字段名
+      port_field: "port"           # 端口字段名
+      username_field: "username"   # 用户名字段名
+      password_field: "password"   # 密码字段名
+
+# ----------------------------------------------------------------------------
+# 代理配置
+# ----------------------------------------------------------------------------
+# 配置本地SOCKS5代理端口及其对应的上游代理
+proxies:
+  # 代理端口1 - 基本配置示例
+  - local_port: 1080  # 本地监听端口（1024-65535）
+    name: "代理端口1"  # 代理名称（用于标识）
+    api_provider_id: "91http"  # 使用的API提供商ID
+    
+    # 上游代理配置
+    upstream:
+      server: "proxy1.example.com"  # 上游代理服务器地址
+      port: 10000                   # 上游代理端口
+      username: null                # 认证用户名（null表示不需要认证）
+      password: null                # 认证密码
+      protocol: "socks5"            # 代理协议
+    
+    # 是否启用自动监控和切换
+    monitoring_enabled: false
+  
+  # 代理端口2 - 启用监控示例
+  - local_port: 1081
+    name: "代理端口2"
+    api_provider_id: "91http"
+    
+    upstream:
+      server: "proxy2.example.com"
+      port: 10001
+      username: null
+      password: null
+      protocol: "socks5"
+    
+    # 启用监控后，系统会自动检查此代理的健康状态
+    # 当检测到失败时，会自动从API获取新代理并切换
+    monitoring_enabled: true
+  
+  # 代理端口3 - 带认证的上游代理示例
+  - local_port: 1082
+    name: "代理端口3（带认证）"
+    api_provider_id: "91http"
+    
+    upstream:
+      server: "proxy3.example.com"
+      port: 10002
+      username: "proxy_user"      # 上游代理需要认证时填写
+      password: "proxy_password"  # 上游代理密码
+      protocol: "socks5"
+    
+    monitoring_enabled: true
+
+# ============================================================================
+# 配置说明
+# ============================================================================
+#
+# 1. 端口配置：
+#    - 本地代理端口范围: 1024-65535
+#    - 避免使用系统保留端口（1-1023）
+#    - 确保端口不与其他服务冲突
+#
+# 2. 监控配置：
+#    - monitoring_enabled: false - 手动管理，不自动切换
+#    - monitoring_enabled: true - 自动监控和切换
+#    - 建议先手动测试代理可用性，再启用自动监控
+#
+# 3. API配置：
+#    - 确保API提供商的凭据正确
+#    - 测试API连接: proxy-relay test-api <provider_id>
+#    - 可配置多个提供商作为备份
+#
+# 4. 安全建议：
+#    - 修改默认的Web管理员密码
+#    - 限制Web界面访问（使用防火墙或反向代理）
+#    - 定期更新API密钥
+#    - 不要将包含真实凭据的config.yaml提交到版本控制
+#
+# 5. 性能调优：
+#    - check_interval: 根据代理稳定性调整，稳定的代理可以增加间隔
+#    - failure_threshold: 增加阈值可以减少误切换，但会延长故障检测时间
+#    - 同时运行的代理数量建议不超过20个
+#
+# ============================================================================

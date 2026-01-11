@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+
+{% block title %}历史记录 - 代理中转系统{% endblock %}
+
+{% block content %}
+<div x-data="historyData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="mb-6">
+        <h2 class="text-3xl font-bold text-gray-800">历史记录</h2>
+        <p class="text-gray-600 mt-1">查看代理切换历史和详细信息</p>
+    </div>
+    
+    <!-- Filters -->
+    <div class="bg-white rounded-lg shadow mb-6 p-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">端口筛选</label>
+                <select 
+                    x-model="filters.port"
+                    @change="loadHistory()"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="">全部端口</option>
+                    <template x-for="proxy in proxies" :key="proxy.local_port">
+                        <option :value="proxy.local_port" x-text="proxy.local_port + ' - ' + proxy.name"></option>
+                    </template>
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">原因筛选</label>
+                <select 
+                    x-model="filters.reason"
+                    @change="applyFilters()"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="">全部原因</option>
+                    <option value="health_check_failed">健康检查失败</option>
+                    <option value="manual">手动切换</option>
+                    <option value="api_error">API错误</option>
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">状态筛选</label>
+                <select 
+                    x-model="filters.success"
+                    @change="applyFilters()"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="">全部状态</option>
+                    <option value="true">成功</option>
+                    <option value="false">失败</option>
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">显示数量</label>
+                <select 
+                    x-model="filters.limit"
+                    @change="loadHistory()"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="50">50条</option>
+                    <option value="100">100条</option>
+                    <option value="200">200条</option>
+                    <option value="500">500条</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="mt-4 flex justify-between items-center">
+            <div class="text-sm text-gray-600">
+                共 <span class="font-semibold" x-text="filteredHistory.length"></span> 条记录
+            </div>
+            <button 
+                @click="clearFilters()"
+                class="text-sm text-blue-600 hover:text-blue-700"
+            >
+                <i class="fas fa-redo mr-1"></i>
+                重置筛选
+            </button>
+        </div>
+    </div>
+    
+    <!-- History Table -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">时间</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">端口</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">旧代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">新代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">原因</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-if="filteredHistory.length === 0">
+                        <tr>
+                            <td colspan="8" class="px-6 py-8 text-center text-gray-500">
+                                <i class="fas fa-inbox text-4xl mb-2"></i>
+                                <p>暂无历史记录</p>
+                            </td>
+                        </tr>
+                    </template>
+                    
+                    <template x-for="entry in paginatedHistory" :key="entry.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <span x-text="entry.id"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <div x-text="formatDate(entry.timestamp)"></div>
+                                <div class="text-xs text-gray-400" x-text="formatTime(entry.timestamp)"></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm font-medium text-gray-900" x-text="entry.local_port"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <template x-if="entry.old_upstream">
+                                    <div class="text-sm">
+                                        <div class="text-gray-900" x-text="entry.old_upstream.server"></div>
+                                        <div class="text-gray-500 text-xs" x-text="'端口: ' + entry.old_upstream.port"></div>
+                                    </div>
+                                </template>
+                                <template x-if="!entry.old_upstream">
+                                    <span class="text-sm text-gray-400">-</span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm">
+                                    <div class="text-gray-900" x-text="entry.new_upstream.server"></div>
+                                    <div class="text-gray-500 text-xs" x-text="'端口: ' + entry.new_upstream.port"></div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="{
+                                        'bg-yellow-100 text-yellow-800': entry.reason === 'health_check_failed',
+                                        'bg-blue-100 text-blue-800': entry.reason === 'manual',
+                                        'bg-red-100 text-red-800': entry.reason === 'api_error'
+                                    }"
+                                    x-text="getReasonText(entry.reason)"
+                                ></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="entry.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                >
+                                    <i :class="entry.success ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                    <span x-text="entry.success ? '成功' : '失败'"></span>
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                <button 
+                                    @click="viewDetails(entry)"
+                                    class="text-blue-600 hover:text-blue-900"
+                                    title="查看详情"
+                                >
+                                    <i class="fas fa-info-circle"></i>
+                                    详情
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        <div class="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+            <div class="text-sm text-gray-600">
+                显示 <span class="font-semibold" x-text="startIndex + 1"></span> 到 
+                <span class="font-semibold" x-text="Math.min(endIndex, filteredHistory.length)"></span> 条，
+                共 <span class="font-semibold" x-text="filteredHistory.length"></span> 条
+            </div>
+            <div class="flex space-x-2">
+                <button 
+                    @click="previousPage()"
+                    :disabled="currentPage === 1"
+                    class="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                    <i class="fas fa-chevron-left"></i>
+                    上一页
+                </button>
+                <span class="px-3 py-1 text-sm text-gray-600">
+                    第 <span x-text="currentPage"></span> / <span x-text="totalPages"></span> 页
+                </span>
+                <button 
+                    @click="nextPage()"
+                    :disabled="currentPage === totalPages"
+                    class="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                    下一页
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Details Modal -->
+    <div 
+        x-show="showDetailsModal"
+        x-cloak
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="showDetailsModal = false"
+    >
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-800">切换详情</h3>
+                <button @click="showDetailsModal = false" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="px-6 py-4" x-show="selectedEntry">
+                <template x-if="selectedEntry">
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">记录ID</label>
+                                <div class="text-gray-900" x-text="selectedEntry.id"></div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">本地端口</label>
+                                <div class="text-gray-900" x-text="selectedEntry.local_port"></div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">切换时间</label>
+                            <div class="text-gray-900" x-text="formatDateTime(selectedEntry.timestamp)"></div>
+                        </div>
+                        
+                        <div class="border-t border-gray-200 pt-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">旧代理</label>
+                            <template x-if="selectedEntry.old_upstream">
+                                <div class="bg-gray-50 rounded-lg p-4 space-y-2">
+                                    <div class="flex justify-between">
+                                        <span class="text-sm text-gray-600">服务器:</span>
+                                        <span class="text-sm font-medium" x-text="selectedEntry.old_upstream.server"></span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-sm text-gray-600">端口:</span>
+                                        <span class="text-sm font-medium" x-text="selectedEntry.old_upstream.port"></span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-sm text-gray-600">协议:</span>
+                                        <span class="text-sm font-medium" x-text="selectedEntry.old_upstream.protocol"></span>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="!selectedEntry.old_upstream">
+                                <div class="text-sm text-gray-400">无旧代理（首次配置）</div>
+                            </template>
+                        </div>
+                        
+                        <div class="border-t border-gray-200 pt-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">新代理</label>
+                            <div class="bg-blue-50 rounded-lg p-4 space-y-2">
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">服务器:</span>
+                                    <span class="text-sm font-medium" x-text="selectedEntry.new_upstream.server"></span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">端口:</span>
+                                    <span class="text-sm font-medium" x-text="selectedEntry.new_upstream.port"></span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">协议:</span>
+                                    <span class="text-sm font-medium" x-text="selectedEntry.new_upstream.protocol"></span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">切换原因</label>
+                                <span 
+                                    class="inline-block px-3 py-1 text-sm font-semibold rounded-full"
+                                    :class="{
+                                        'bg-yellow-100 text-yellow-800': selectedEntry.reason === 'health_check_failed',
+                                        'bg-blue-100 text-blue-800': selectedEntry.reason === 'manual',
+                                        'bg-red-100 text-red-800': selectedEntry.reason === 'api_error'
+                                    }"
+                                    x-text="getReasonText(selectedEntry.reason)"
+                                ></span>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">切换状态</label>
+                                <span 
+                                    class="inline-block px-3 py-1 text-sm font-semibold rounded-full"
+                                    :class="selectedEntry.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                >
+                                    <i :class="selectedEntry.success ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                    <span x-text="selectedEntry.success ? '成功' : '失败'"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end">
+                <button 
+                    @click="showDetailsModal = false"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg"
+                >
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function historyData() {
+    return {
+        history: [],
+        proxies: [],
+        filters: {
+            port: '',
+            reason: '',
+            success: '',
+            limit: 100
+        },
+        currentPage: 1,
+        pageSize: 20,
+        showDetailsModal: false,
+        selectedEntry: null,
+        
+        async init() {
+            await this.loadProxies();
+            await this.loadHistory();
+        },
+        
+        async loadProxies() {
+            try {
+                const response = await fetch('/api/proxies');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.proxies = data.proxies || [];
+                }
+            } catch (error) {
+                console.error('Failed to load proxies:', error);
+            }
+        },
+        
+        async loadHistory() {
+            try {
+                let url = `/api/history?limit=${this.filters.limit}`;
+                if (this.filters.port) {
+                    url += `&port=${this.filters.port}`;
+                }
+                
+                const response = await fetch(url);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.history = data.history || [];
+                    this.currentPage = 1;
+                }
+            } catch (error) {
+                console.error('Failed to load history:', error);
+            }
+        },
+        
+        get filteredHistory() {
+            let filtered = this.history;
+            
+            if (this.filters.reason) {
+                filtered = filtered.filter(entry => entry.reason === this.filters.reason);
+            }
+            
+            if (this.filters.success !== '') {
+                const successValue = this.filters.success === 'true';
+                filtered = filtered.filter(entry => entry.success === successValue);
+            }
+            
+            return filtered;
+        },
+        
+        get paginatedHistory() {
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = start + this.pageSize;
+            return this.filteredHistory.slice(start, end);
+        },
+        
+        get totalPages() {
+            return Math.ceil(this.filteredHistory.length / this.pageSize) || 1;
+        },
+        
+        get startIndex() {
+            return (this.currentPage - 1) * this.pageSize;
+        },
+        
+        get endIndex() {
+            return this.currentPage * this.pageSize;
+        },
+        
+        applyFilters() {
+            this.currentPage = 1;
+        },
+        
+        clearFilters() {
+            this.filters = {
+                port: '',
+                reason: '',
+                success: '',
+                limit: 100
+            };
+            this.loadHistory();
+        },
+        
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+            }
+        },
+        
+        nextPage() {
+            if (this.currentPage < this.totalPages) {
+                this.currentPage++;
+            }
+        },
+        
+        viewDetails(entry) {
+            this.selectedEntry = entry;
+            this.showDetailsModal = true;
+        },
+        
+        formatDate(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            });
+        },
+        
+        formatTime(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        },
+        
+        formatDateTime(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        },
+        
+        getReasonText(reason) {
+            const reasons = {
+                'health_check_failed': '健康检查失败',
+                'manual': '手动切换',
+                'api_error': 'API错误'
+            };
+            return reasons[reason] || reason;
+        }
+    };
+}
+</script>
+{% endblock %}

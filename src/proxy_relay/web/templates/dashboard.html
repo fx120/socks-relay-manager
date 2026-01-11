@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}仪表板 - 代理中转系统{% endblock %}
+
+{% block content %}
+<div x-data="dashboardData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="mb-6">
+        <h2 class="text-3xl font-bold text-gray-800">仪表板</h2>
+        <p class="text-gray-600 mt-1">系统概览和实时状态</p>
+    </div>
+    
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <!-- Total Proxies -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">代理总数</p>
+                    <p class="text-3xl font-bold text-gray-800 mt-2" x-text="systemStatus.total_proxies || 0"></p>
+                </div>
+                <div class="bg-blue-100 rounded-full p-3">
+                    <i class="fas fa-server text-blue-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Active Monitoring -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">监控中</p>
+                    <p class="text-3xl font-bold text-gray-800 mt-2" x-text="systemStatus.active_monitoring || 0"></p>
+                </div>
+                <div class="bg-green-100 rounded-full p-3">
+                    <i class="fas fa-heartbeat text-green-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Healthy Proxies -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">健康代理</p>
+                    <p class="text-3xl font-bold text-green-600 mt-2" x-text="systemStatus.healthy_proxies || 0"></p>
+                </div>
+                <div class="bg-green-100 rounded-full p-3">
+                    <i class="fas fa-check-circle text-green-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Unhealthy Proxies -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">异常代理</p>
+                    <p class="text-3xl font-bold text-red-600 mt-2" x-text="systemStatus.unhealthy_proxies || 0"></p>
+                </div>
+                <div class="bg-red-100 rounded-full p-3">
+                    <i class="fas fa-exclamation-circle text-red-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Proxy Status Table -->
+    <div class="bg-white rounded-lg shadow mb-6">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-800">代理端口状态</h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">端口</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">上游代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">监控状态</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">健康状态</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最后检查</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-if="proxies.length === 0">
+                        <tr>
+                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                                <i class="fas fa-inbox text-4xl mb-2"></i>
+                                <p>暂无代理配置</p>
+                            </td>
+                        </tr>
+                    </template>
+                    
+                    <template x-for="proxy in proxies" :key="proxy.local_port">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm font-medium text-gray-900" x-text="proxy.local_port"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm text-gray-900" x-text="proxy.name"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm text-gray-600" x-text="proxy.upstream.server + ':' + proxy.upstream.port"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="proxy.monitoring_enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                    x-text="proxy.monitoring_enabled ? '监控中' : '未监控'"
+                                ></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <template x-if="proxy.monitoring_status && proxy.monitoring_status.enabled">
+                                    <span 
+                                        class="px-2 py-1 text-xs font-semibold rounded-full"
+                                        :class="proxy.monitoring_status.failure_count === 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                        x-text="proxy.monitoring_status.failure_count === 0 ? '健康' : '异常 (' + proxy.monitoring_status.failure_count + ')'"
+                                    ></span>
+                                </template>
+                                <template x-if="!proxy.monitoring_status || !proxy.monitoring_status.enabled">
+                                    <span class="text-sm text-gray-400">-</span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <template x-if="proxy.monitoring_status && proxy.monitoring_status.last_check_time">
+                                    <span x-text="formatTime(proxy.monitoring_status.last_check_time)"></span>
+                                </template>
+                                <template x-if="!proxy.monitoring_status || !proxy.monitoring_status.last_check_time">
+                                    <span class="text-gray-400">-</span>
+                                </template>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Recent Switch History -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-800">最近切换记录</h3>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">时间</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">端口</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">旧代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">新代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">原因</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-if="history.length === 0">
+                        <tr>
+                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                                <i class="fas fa-history text-4xl mb-2"></i>
+                                <p>暂无切换记录</p>
+                            </td>
+                        </tr>
+                    </template>
+                    
+                    <template x-for="entry in history" :key="entry.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <span x-text="formatTime(entry.timestamp)"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="text-sm font-medium text-gray-900" x-text="entry.local_port"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <template x-if="entry.old_upstream">
+                                    <span x-text="entry.old_upstream.server + ':' + entry.old_upstream.port"></span>
+                                </template>
+                                <template x-if="!entry.old_upstream">
+                                    <span class="text-gray-400">-</span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <span x-text="entry.new_upstream.server + ':' + entry.new_upstream.port"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="{
+                                        'bg-yellow-100 text-yellow-800': entry.reason === 'health_check_failed',
+                                        'bg-blue-100 text-blue-800': entry.reason === 'manual',
+                                        'bg-red-100 text-red-800': entry.reason === 'api_error'
+                                    }"
+                                    x-text="getReasonText(entry.reason)"
+                                ></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="entry.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                    x-text="entry.success ? '成功' : '失败'"
+                                ></span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dashboardData() {
+    return {
+        systemStatus: {},
+        proxies: [],
+        history: [],
+        
+        async init() {
+            await this.loadSystemStatus();
+            await this.loadProxies();
+            await this.loadHistory();
+            
+            // 自动刷新（每30秒）
+            setInterval(() => {
+                this.loadSystemStatus();
+                this.loadProxies();
+                this.loadHistory();
+            }, 30000);
+        },
+        
+        async loadSystemStatus() {
+            try {
+                const response = await fetch('/api/system/status');
+                if (response.ok) {
+                    this.systemStatus = await response.json();
+                }
+            } catch (error) {
+                console.error('Failed to load system status:', error);
+            }
+        },
+        
+        async loadProxies() {
+            try {
+                const response = await fetch('/api/proxies');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.proxies = data.proxies || [];
+                }
+            } catch (error) {
+                console.error('Failed to load proxies:', error);
+            }
+        },
+        
+        async loadHistory() {
+            try {
+                const response = await fetch('/api/history?limit=10');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.history = data.history || [];
+                }
+            } catch (error) {
+                console.error('Failed to load history:', error);
+            }
+        },
+        
+        formatTime(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        },
+        
+        getReasonText(reason) {
+            const reasons = {
+                'health_check_failed': '健康检查失败',
+                'manual': '手动切换',
+                'api_error': 'API错误'
+            };
+            return reasons[reason] || reason;
+        }
+    };
+}
+</script>
+{% endblock %}

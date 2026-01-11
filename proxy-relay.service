@@ -1,0 +1,74 @@
+[Unit]
+Description=Proxy Relay System - SOCKS5 proxy relay with automatic health monitoring
+Documentation=https://github.com/yourusername/proxy-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxy-relay
+Group=proxy-relay
+WorkingDirectory=/opt/proxy-relay
+
+# 主进程命令 - 启动Web API服务器和监控系统
+ExecStart=/opt/proxy-relay/venv/bin/python -m uvicorn proxy_relay.web_api:app --host 0.0.0.0 --port 8080
+
+# 重载配置信号
+ExecReload=/bin/kill -HUP $MAINPID
+
+# 进程管理
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# 环境变量
+Environment="PROXY_RELAY_CONFIG=/etc/proxy-relay/config.yaml"
+Environment="PYTHONUNBUFFERED=1"
+
+# 安全加固选项
+# 防止提权
+NoNewPrivileges=true
+
+# 私有临时目录
+PrivateTmp=true
+
+# 文件系统保护
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxy-relay /var/log/proxy-relay /etc/proxy-relay
+
+# 内核保护
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+
+# 限制系统调用
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# 网络限制
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# 其他安全选项
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=512
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proxy-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -6,13 +6,14 @@
 set -e
 
 CONFIG_FILE="${1:-/etc/proxy-relay/config.yaml}"
+WEB_PORT="${2:-8080}"
 
 echo "生成默认配置文件: $CONFIG_FILE"
 
 # 生成 admin123 的密码哈希
 # $2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIq.Ejm2W2
 
-cat > "$CONFIG_FILE" << 'EOF'
+cat > "$CONFIG_FILE" << EOF
 # ============================================================================
 # 代理中转系统配置文件 - 默认配置
 # ============================================================================
@@ -26,12 +27,12 @@ cat > "$CONFIG_FILE" << 'EOF'
 # ============================================================================
 
 system:
-  web_port: 8080
+  web_port: ${WEB_PORT}
   web_auth:
     enabled: true
     username: admin
     # 默认密码: admin123 (⚠️ 首次登录后必须修改！)
-    password_hash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIq.Ejm2W2"
+    password_hash: "\$2b\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIq.Ejm2W2"
   log_level: INFO
   log_file: /var/log/proxy-relay/app.log
   log_max_size: 104857600
@@ -70,23 +71,13 @@ api_providers:
 
 # 代理端口配置 - 示例配置
 # 可以在 Web 界面添加、修改或删除代理端口
-proxies:
-  - local_port: 1080
-    name: "示例代理端口1"
-    api_provider_id: "test_provider"
-    upstream:
-      server: "127.0.0.1"  # 占位符，需要配置真实代理
-      port: 10000
-      username: null
-      password: null
-      protocol: "socks5"
-    monitoring_enabled: false
+proxies: []
 
 # ============================================================================
 # 下一步操作：
 # ============================================================================
 # 
-# 1. 访问 Web 界面: http://your-server-ip:8080
+# 1. 访问 Web 界面: http://your-server-ip:${WEB_PORT}
 # 2. 使用默认账号登录: admin / admin123
 # 3. 立即修改密码（设置 -> 安全设置）
 # 4. 配置 API 提供商（设置 -> API 提供商）
@@ -99,7 +90,7 @@ EOF
 echo "✓ 默认配置文件已生成"
 echo ""
 echo "默认登录信息:"
-echo "  URL: http://your-server-ip:8080"
+echo "  URL: http://your-server-ip:${WEB_PORT}"
 echo "  用户名: admin"
 echo "  密码: admin123"
 echo ""

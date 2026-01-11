@@ -196,6 +196,80 @@ install_python_deps() {
     log_info "Python 依赖安装完成"
 }
 
+# 检查端口是否被占用
+check_port() {
+    local port=$1
+    if netstat -tlnp 2>/dev/null | grep -q ":${port} " || ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+        return 1  # 端口被占用
+    else
+        return 0  # 端口可用
+    fi
+}
+
+# 选择可用端口
+select_available_port() {
+    local default_port=8080
+    
+    echo ""
+    echo "=========================================="
+    echo "  Web 端口配置"
+    echo "=========================================="
+    
+    # 检查默认端口
+    if check_port $default_port; then
+        echo "默认端口 $default_port 可用"
+        read -p "使用默认端口 $default_port? (Y/n): " use_default
+        
+        if [ -z "$use_default" ] || [ "$use_default" = "y" ] || [ "$use_default" = "Y" ]; then
+            echo $default_port
+            return
+        fi
+    else
+        log_warn "默认端口 $default_port 已被占用"
+    fi
+    
+    # 显示可用端口建议
+    echo ""
+    echo "检查其他常用端口..."
+    available_ports=()
+    for port in 8081 8082 8083 8088 8090 8888 9090; do
+        if check_port $port; then
+            available_ports+=($port)
+            echo "  ✓ $port 可用"
+        fi
+    done
+    
+    echo ""
+    if [ ${#available_ports[@]} -gt 0 ]; then
+        echo "建议使用: ${available_ports[0]}"
+    fi
+    
+    # 让用户输入端口
+    while true; do
+        read -p "请输入 Web 端口 (1024-65535): " port
+        
+        # 验证端口范围
+        if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+            log_error "请输入有效的数字"
+            continue
+        fi
+        
+        if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+            log_error "端口必须在 1024-65535 之间"
+            continue
+        fi
+        
+        # 检查端口是否被占用
+        if ! check_port $port; then
+            log_warn "端口 $port 已被占用，请选择其他端口"
+            continue
+        fi
+        
+        echo $port
+        return
+    done
+}
+
 # 配置系统
 configure_system() {
     log_info "配置系统..."
@@ -203,25 +277,64 @@ configure_system() {
     # 检查配置文件是否存在
     if [ ! -f "/etc/proxy-relay/config.yaml" ]; then
         log_info "生成默认配置文件..."
-        bash /opt/proxy-relay/app/scripts/init_default_config.sh /etc/proxy-relay/config.yaml
+        
+        # 选择可用端口
+        WEB_PORT=$(select_available_port)
+        log_info "使用 Web 端口: $WEB_PORT"
+        
+        # 生成配置文件（直接传递端口参数）
+        bash /opt/proxy-relay/app/scripts/init_default_config.sh /etc/proxy-relay/config.yaml "$WEB_PORT"
+        
         chown proxy-relay:proxy-relay /etc/proxy-relay/config.yaml
         
+        # 创建默认 sing-box 配置
+        log_info "创建默认 sing-box 配置..."
+        mkdir -p /etc/sing-box
+        bash /opt/proxy-relay/app/scripts/init_singbox_config.sh /etc/sing-box/config.json
+        chown proxy-relay:proxy-relay /etc/sing-box/config.json
+        
         log_info "✓ 默认配置已生成"
-        log_warn "默认登录信息:"
-        log_warn "  URL: http://$(hostname -I | awk '{print $1}'):8080"
-        log_warn "  用户名: admin"
-        log_warn "  密码: admin123"
-        log_warn ""
+        echo ""
+        echo "=========================================="
+        echo "  默认登录信息"
+        echo "=========================================="
+        echo "  URL: http://$(hostname -I | awk '{print $1}'):$WEB_PORT"
+        echo "  用户名: admin"
+        echo "  密码: admin123"
+        echo "=========================================="
+        echo ""
         log_warn "⚠️  首次登录后请立即修改密码！"
-        log_warn "⚠️  请在 Web 界面配置 API 提供商信息"
+        log_warn "⚠️  请在 Web 界面配置 API 提供商和代理"
     else
         log_info "配置文件已存在: /etc/proxy-relay/config.yaml"
+        
+        # 读取现有端口
+        WEB_PORT=$(grep "web_port:" /etc/proxy-relay/config.yaml | awk '{print $2}')
+        log_info "使用现有 Web 端口: $WEB_PORT"
+        
+        # 确保 sing-box 配置存在
+        if [ ! -f "/etc/sing-box/config.json" ]; then
+            log_info "创建默认 sing-box 配置..."
+            mkdir -p /etc/sing-box
+            bash /opt/proxy-relay/app/scripts/init_singbox_config.sh /etc/sing-box/config.json
+            chown proxy-relay:proxy-relay /etc/sing-box/config.json
+        fi
     fi
 }
 
 # 创建 systemd 服务
 create_systemd_services() {
     log_info "创建 systemd 服务..."
+    
+    # 读取 Web 端口
+    if [ -z "$WEB_PORT" ]; then
+        WEB_PORT=$(grep "web_port:" /etc/proxy-relay/config.yaml | awk '{print $2}')
+        if [ -z "$WEB_PORT" ]; then
+            WEB_PORT=8080
+        fi
+    fi
+    
+    log_info "配置 Web 端口: $WEB_PORT"
     
     # proxy-relay 服务
     cat > /etc/systemd/system/proxy-relay.service <<EOF
@@ -236,7 +349,8 @@ Group=proxy-relay
 WorkingDirectory=/opt/proxy-relay/app
 Environment="PATH=/opt/proxy-relay/app/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/opt/proxy-relay/app/src"
-ExecStart=/opt/proxy-relay/app/venv/bin/python -m uvicorn proxy_relay.web_api:app --host 0.0.0.0 --port 8080
+Environment="PROXY_RELAY_CONFIG=/etc/proxy-relay/config.yaml"
+ExecStart=/opt/proxy-relay/app/venv/bin/python -m uvicorn proxy_relay.web_api:app --host 0.0.0.0 --port $WEB_PORT
 Restart=on-failure
 RestartSec=5s
 
@@ -245,7 +359,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/proxy-relay /var/log/proxy-relay /etc/proxy-relay
+ReadWritePaths=/var/lib/proxy-relay /var/log/proxy-relay /etc/proxy-relay /etc/sing-box
 
 # 日志
 StandardOutput=journal
@@ -266,7 +380,7 @@ After=network.target
 Type=simple
 User=proxy-relay
 Group=proxy-relay
-ExecStart=/usr/local/bin/sing-box run -c /etc/proxy-relay/sing-box.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
 Restart=on-failure
 RestartSec=5s
 
@@ -355,50 +469,76 @@ verify_deployment() {
 
 # 显示部署信息
 show_info() {
+    # 读取实际使用的端口
+    if [ -z "$WEB_PORT" ]; then
+        WEB_PORT=$(grep "web_port:" /etc/proxy-relay/config.yaml | awk '{print $2}')
+        if [ -z "$WEB_PORT" ]; then
+            WEB_PORT=8080
+        fi
+    fi
+    
+    local server_ip=$(hostname -I | awk '{print $1}')
+    
     echo ""
-    echo "=========================================="
-    echo "  代理中转系统部署完成！"
-    echo "=========================================="
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║                                                            ║"
+    echo "║          🎉  代理中转系统部署完成！  🎉                    ║"
+    echo "║                                                            ║"
+    echo "╚════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "📋 下一步操作："
+    echo "┌────────────────────────────────────────────────────────────┐"
+    echo "│  📱 立即访问 Web 管理界面                                  │"
+    echo "├────────────────────────────────────────────────────────────┤"
+    echo "│                                                            │"
+    echo "│  🌐 URL:  http://$server_ip:$WEB_PORT"
+    echo "│                                                            │"
+    echo "│  👤 用户名: admin                                          │"
+    echo "│  🔑 密码:   admin123                                       │"
+    echo "│                                                            │"
+    echo "│  ⚠️  首次登录后请立即修改密码！                            │"
+    echo "│                                                            │"
+    echo "└────────────────────────────────────────────────────────────┘"
     echo ""
-    echo "1. 访问 Web 管理界面："
-    echo "   http://$(hostname -I | awk '{print $1}'):8080"
+    echo "📋 配置步骤："
     echo ""
-    echo "2. 使用默认凭据登录："
-    echo "   用户名: admin"
-    echo "   密码: admin123"
-    echo ""
-    echo "3. ⚠️  首次登录后请立即修改密码！"
-    echo ""
-    echo "4. 配置 API 提供商和代理"
+    echo "  1️⃣  打开浏览器访问上述 URL"
+    echo "  2️⃣  使用默认凭据登录"
+    echo "  3️⃣  进入「系统设置」修改密码"
+    echo "  4️⃣  进入「API提供商」配置你的代理API"
+    echo "  5️⃣  进入「代理管理」添加代理配置"
+    echo "  6️⃣  完成！开始使用代理服务"
     echo ""
     echo "📊 服务状态:"
-    echo "  proxy-relay: $(systemctl is-active proxy-relay)"
-    echo "  sing-box:    $(systemctl is-active sing-box)"
-    if ! systemctl is-active --quiet sing-box; then
-        echo "  (sing-box 会在配置代理后自动启动)"
+    echo ""
+    if systemctl is-active --quiet proxy-relay; then
+        echo "  ✅ proxy-relay: 运行中"
+    else
+        echo "  ❌ proxy-relay: 未运行"
+    fi
+    
+    if systemctl is-active --quiet sing-box; then
+        echo "  ✅ sing-box:    运行中"
+    else
+        echo "  ⏸️  sing-box:    待配置 (配置代理后自动启动)"
     fi
     echo ""
-    echo "📖 详细配置指南："
-    echo "   /opt/proxy-relay/app/docs/POST_DEPLOYMENT_GUIDE.md"
+    echo "📖 文档资源："
     echo ""
-    echo "🔍 查看服务状态："
-    echo "   sudo systemctl status proxy-relay"
-    echo "   sudo systemctl status sing-box"
+    echo "  • 配置指南: /opt/proxy-relay/app/docs/POST_DEPLOYMENT_GUIDE.md"
+    echo "  • 故障排除: /opt/proxy-relay/app/docs/TROUBLESHOOTING.md"
+    echo "  • 更新指南: /opt/proxy-relay/app/docs/UPDATE_GUIDE.md"
     echo ""
-    echo "📝 查看日志："
-    echo "   sudo journalctl -u proxy-relay -f"
-    echo "   sudo journalctl -u sing-box -f"
+    echo "🔧 常用命令："
     echo ""
-    echo "🔧 配置文件："
-    echo "   /etc/proxy-relay/config.yaml"
+    echo "  • 查看服务状态: sudo systemctl status proxy-relay"
+    echo "  • 查看日志:     sudo journalctl -u proxy-relay -f"
+    echo "  • 运行诊断:     sudo /opt/proxy-relay/scripts/diagnose.sh"
+    echo "  • 重启服务:     sudo systemctl restart proxy-relay"
     echo ""
-    echo "🆘 需要帮助？"
-    echo "   运行诊断: sudo /opt/proxy-relay/scripts/diagnose.sh"
-    echo "   故障排除: /opt/proxy-relay/app/docs/TROUBLESHOOTING.md"
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║  🚀 现在就访问 Web 界面开始配置吧！                        ║"
+    echo "╚════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "=========================================="
 }
 
 # 主函数

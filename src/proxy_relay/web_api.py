@@ -104,6 +104,12 @@ class APIProviderUpdateModel(BaseModel):
     response_format: Optional[ResponseFormatModel] = None
 
 
+class PasswordChangeModel(BaseModel):
+    """密码修改模型"""
+    old_password: str
+    new_password: str = Field(min_length=6)
+
+
 # ==================== FastAPI 应用 ====================
 
 class WebAPI:
@@ -228,6 +234,9 @@ class WebAPI:
         
         # 实时状态更新路由 (SSE)
         self.app.get("/api/events/status", dependencies=[Depends(self.auth_dependency)])(self.stream_status_updates)
+        
+        # 密码修改路由
+        self.app.post("/api/auth/change-password", dependencies=[Depends(self.auth_dependency)])(self.change_password)
         
         logger.debug("API routes configured with authentication")
     
@@ -985,6 +994,54 @@ class WebAPI:
             )
     
     # ==================== 配置管理端点 ====================
+    
+    async def change_password(self, password_change: PasswordChangeModel):
+        """
+        修改管理员密码
+        
+        Args:
+            password_change: 密码修改请求
+            
+        Returns:
+            dict: 操作结果
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 验证旧密码
+            from .auth import verify_password, hash_password
+            if not verify_password(password_change.old_password, config.system.web_auth.password_hash):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="旧密码不正确"
+                )
+            
+            # 生成新密码哈希
+            new_password_hash = hash_password(password_change.new_password)
+            
+            # 更新配置
+            config.system.web_auth.password_hash = new_password_hash
+            
+            # 保存配置
+            self.config_manager.save_config(config)
+            
+            logger.info("管理员密码已修改")
+            
+            return {
+                "message": "密码修改成功",
+                "success": True
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to change password: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"密码修改失败: {str(e)}"
+            )
     
     async def get_config(self):
         """

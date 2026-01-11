@@ -202,17 +202,18 @@ configure_system() {
     
     # 检查配置文件是否存在
     if [ ! -f "/etc/proxy-relay/config.yaml" ]; then
-        if [ -f "/opt/proxy-relay/app/config.yaml.example" ]; then
-            log_info "创建配置文件..."
-            cp /opt/proxy-relay/app/config.yaml.example /etc/proxy-relay/config.yaml
-            chown proxy-relay:proxy-relay /etc/proxy-relay/config.yaml
-            
-            log_warn "请编辑配置文件: /etc/proxy-relay/config.yaml"
-            log_warn "特别是 API 提供商的认证信息"
-        else
-            log_error "找不到配置文件模板"
-            exit 1
-        fi
+        log_info "生成默认配置文件..."
+        bash /opt/proxy-relay/app/scripts/init_default_config.sh /etc/proxy-relay/config.yaml
+        chown proxy-relay:proxy-relay /etc/proxy-relay/config.yaml
+        
+        log_info "✓ 默认配置已生成"
+        log_warn "默认登录信息:"
+        log_warn "  URL: http://$(hostname -I | awk '{print $1}'):8080"
+        log_warn "  用户名: admin"
+        log_warn "  密码: admin123"
+        log_warn ""
+        log_warn "⚠️  首次登录后请立即修改密码！"
+        log_warn "⚠️  请在 Web 界面配置 API 提供商信息"
     else
         log_info "配置文件已存在: /etc/proxy-relay/config.yaml"
     fi
@@ -359,34 +360,44 @@ show_info() {
     echo "  代理中转系统部署完成！"
     echo "=========================================="
     echo ""
-    echo "服务状态:"
+    echo "📋 下一步操作："
+    echo ""
+    echo "1. 访问 Web 管理界面："
+    echo "   http://$(hostname -I | awk '{print $1}'):8080"
+    echo ""
+    echo "2. 使用默认凭据登录："
+    echo "   用户名: admin"
+    echo "   密码: admin123"
+    echo ""
+    echo "3. ⚠️  首次登录后请立即修改密码！"
+    echo ""
+    echo "4. 配置 API 提供商和代理"
+    echo ""
+    echo "📊 服务状态:"
     echo "  proxy-relay: $(systemctl is-active proxy-relay)"
     echo "  sing-box:    $(systemctl is-active sing-box)"
+    if ! systemctl is-active --quiet sing-box; then
+        echo "  (sing-box 会在配置代理后自动启动)"
+    fi
     echo ""
-    echo "访问地址:"
-    echo "  Web 界面: http://$(hostname -I | awk '{print $1}'):8080"
-    echo "  默认用户: admin"
-    echo "  默认密码: 请查看配置文件"
+    echo "📖 详细配置指南："
+    echo "   /opt/proxy-relay/app/docs/POST_DEPLOYMENT_GUIDE.md"
     echo ""
-    echo "配置文件:"
-    echo "  /etc/proxy-relay/config.yaml"
+    echo "🔍 查看服务状态："
+    echo "   sudo systemctl status proxy-relay"
+    echo "   sudo systemctl status sing-box"
     echo ""
-    echo "日志查看:"
-    echo "  sudo journalctl -u proxy-relay -f"
-    echo "  sudo journalctl -u sing-box -f"
+    echo "📝 查看日志："
+    echo "   sudo journalctl -u proxy-relay -f"
+    echo "   sudo journalctl -u sing-box -f"
     echo ""
-    echo "常用命令:"
-    echo "  sudo systemctl status proxy-relay"
-    echo "  sudo systemctl restart proxy-relay"
-    echo "  sudo systemctl stop proxy-relay"
+    echo "🔧 配置文件："
+    echo "   /etc/proxy-relay/config.yaml"
     echo ""
-    echo "下一步:"
-    echo "  1. 编辑配置文件: sudo nano /etc/proxy-relay/config.yaml"
-    echo "  2. 配置 API 提供商认证信息"
-    echo "  3. 重启服务: sudo systemctl restart proxy-relay"
-    echo "  4. 访问 Web 界面进行配置"
+    echo "🆘 需要帮助？"
+    echo "   运行诊断: sudo /opt/proxy-relay/scripts/diagnose.sh"
+    echo "   故障排除: /opt/proxy-relay/app/docs/TROUBLESHOOTING.md"
     echo ""
-    echo "详细文档: /opt/proxy-relay/app/docs/DEPLOYMENT.md"
     echo "=========================================="
 }
 

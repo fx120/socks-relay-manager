@@ -209,14 +209,14 @@ check_port() {
 select_available_port() {
     local default_port=8080
     
-    echo ""
-    echo "=========================================="
-    echo "  Web 端口配置"
-    echo "=========================================="
+    echo "" >&2
+    echo "==========================================" >&2
+    echo "  Web 端口配置" >&2
+    echo "==========================================" >&2
     
     # 检查默认端口
     if check_port $default_port; then
-        echo "默认端口 $default_port 可用"
+        echo "默认端口 $default_port 可用" >&2
         read -p "使用默认端口 $default_port? (Y/n): " use_default
         
         if [ -z "$use_default" ] || [ "$use_default" = "y" ] || [ "$use_default" = "Y" ]; then
@@ -228,19 +228,19 @@ select_available_port() {
     fi
     
     # 显示可用端口建议
-    echo ""
-    echo "检查其他常用端口..."
+    echo "" >&2
+    echo "检查其他常用端口..." >&2
     available_ports=()
     for port in 8081 8082 8083 8088 8090 8888 9090; do
         if check_port $port; then
             available_ports+=($port)
-            echo "  ✓ $port 可用"
+            echo "  ✓ $port 可用" >&2
         fi
     done
     
-    echo ""
+    echo "" >&2
     if [ ${#available_ports[@]} -gt 0 ]; then
-        echo "建议使用: ${available_ports[0]}"
+        echo "建议使用: ${available_ports[0]}" >&2
     fi
     
     # 让用户输入端口
@@ -293,15 +293,15 @@ configure_system() {
         chown proxy-relay:proxy-relay /etc/sing-box/config.json
         
         log_info "✓ 默认配置已生成"
-        echo ""
-        echo "=========================================="
-        echo "  默认登录信息"
-        echo "=========================================="
-        echo "  URL: http://$(hostname -I | awk '{print $1}'):$WEB_PORT"
-        echo "  用户名: admin"
-        echo "  密码: admin123"
-        echo "=========================================="
-        echo ""
+        echo "" >&2
+        echo "==========================================" >&2
+        echo "  默认登录信息" >&2
+        echo "==========================================" >&2
+        echo "  URL: http://$(hostname -I | awk '{print $1}'):$WEB_PORT" >&2
+        echo "  用户名: admin" >&2
+        echo "  密码: admin123" >&2
+        echo "==========================================" >&2
+        echo "" >&2
         log_warn "⚠️  首次登录后请立即修改密码！"
         log_warn "⚠️  请在 Web 界面配置 API 提供商和代理"
     else

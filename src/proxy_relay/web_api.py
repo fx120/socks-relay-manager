@@ -1803,3 +1803,49 @@ def create_app(
     """
     web_api = WebAPI(config_manager, proxy_manager, health_monitor, database)
     return web_api.app
+
+
+# ==================== 默认应用实例 ====================
+# 用于 uvicorn 直接启动
+
+# 创建默认实例（用于开发和简单部署）
+try:
+    from pathlib import Path
+    import os
+    
+    # 默认配置文件路径
+    config_path = os.environ.get(
+        "PROXY_RELAY_CONFIG",
+        "/etc/proxy-relay/config.yaml"
+    )
+    
+    # 如果配置文件不存在，尝试其他位置
+    if not Path(config_path).exists():
+        # 尝试开发环境路径
+        dev_config = Path(__file__).parent.parent.parent / "config.yaml.example"
+        if dev_config.exists():
+            config_path = str(dev_config)
+    
+    # 创建组件实例
+    _config_manager = ConfigManager(config_path)
+    _database = Database(_config_manager._current_config.system.database if _config_manager._current_config else "/var/lib/proxy-relay/data.db")
+    _proxy_manager = ProxyManager(_config_manager, _database)
+    _health_monitor = HealthMonitor(_config_manager, _proxy_manager, _database)
+    
+    # 创建应用实例
+    app = create_app(_config_manager, _proxy_manager, _health_monitor, _database)
+    
+    logger.info(f"默认应用实例已创建，配置文件: {config_path}")
+    
+except Exception as e:
+    logger.error(f"创建默认应用实例失败: {e}")
+    # 创建一个最小的应用实例，避免导入错误
+    app = FastAPI(title="Proxy Relay System (Error)", description="应用初始化失败")
+    
+    @app.get("/")
+    async def root():
+        return {
+            "error": "应用初始化失败",
+            "message": str(e),
+            "hint": "请检查配置文件是否存在: /etc/proxy-relay/config.yaml"
+        }

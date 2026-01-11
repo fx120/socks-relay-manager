@@ -163,11 +163,10 @@ deploy_app() {
     cp -r "$PROJECT_DIR/scripts" /opt/proxy-relay/app/
     cp "$PROJECT_DIR/requirements.txt" /opt/proxy-relay/app/
     cp "$PROJECT_DIR/pyproject.toml" /opt/proxy-relay/app/
-    cp "$PROJECT_DIR/README.md" /opt/proxy-relay/app/
     
-    if [ -f "$PROJECT_DIR/config.yaml.example" ]; then
-        cp "$PROJECT_DIR/config.yaml.example" /opt/proxy-relay/app/
-    fi
+    # 可选文件 - 如果存在则复制
+    [ -f "$PROJECT_DIR/README.md" ] && cp "$PROJECT_DIR/README.md" /opt/proxy-relay/app/
+    [ -f "$PROJECT_DIR/config.yaml.example" ] && cp "$PROJECT_DIR/config.yaml.example" /opt/proxy-relay/app/
     
     chown -R proxy-relay:proxy-relay /opt/proxy-relay/app
     

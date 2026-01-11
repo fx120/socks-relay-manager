@@ -22,11 +22,13 @@
 - **自动健康监控**: 定期检查上游代理的可用性，自动检测故障
 - **智能代理切换**: 当检测到代理失效时，自动从API获取新代理并无缝切换
 - **Web管理界面**: 直观的Web界面，方便管理代理配置和监控状态
+- **安全认证**: HTTP Basic Auth 认证，支持密码修改
 - **RESTful API**: 完整的REST API，支持程序化管理
 - **命令行工具**: 强大的CLI工具，支持所有管理操作
 - **灵活配置**: YAML配置文件，支持多API提供商
 - **详细日志**: 完整的操作日志和审计跟踪
 - **数据持久化**: SQLite数据库存储历史记录和监控状态
+- **一键部署**: 自动化部署脚本，开箱即用
 
 ## 📦 系统要求
 
@@ -65,26 +67,25 @@ cd /tmp && tar -xzf proxy-relay.tar.gz
 sudo bash scripts/deploy.sh
 ```
 
-3. **配置 API 提供商并重启**
+3. **通过 Web 界面完成配置**
 ```bash
-# 编辑配置文件，填入你的 API 认证信息
-sudo nano /etc/proxy-relay/config.yaml
+# 部署完成后，访问 Web 管理界面
+# http://your-server-ip:8080
 
-# 重启服务
-sudo systemctl restart proxy-relay
+# 默认登录凭据：
+# 用户名: admin
+# 密码: admin123
+
+# ⚠️ 首次登录后请立即修改密码！
 ```
 
-**完成！** 访问 `http://your-server-ip:8080` 使用 Web 界面。
+**完成！** 现在可以通过 Web 界面配置 API 提供商和代理。
 
-**运行生产环境测试：**
-```bash
-sudo bash /opt/proxy-relay/app/scripts/production_test.sh
-```
-
-📖 **详细文档：**
+📖 **部署后配置指南：**
+- [部署后配置步骤](docs/POST_DEPLOYMENT_GUIDE.md) - **必读！**
 - [完整部署指南](docs/DEPLOYMENT.md)
 - [生产环境检查清单](docs/PRODUCTION_CHECKLIST.md)
-- [快速开始指南](docs/QUICKSTART.md)
+- [系统更新指南](docs/UPDATE_GUIDE.md)
 
 ---
 

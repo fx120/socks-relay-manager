@@ -10,7 +10,7 @@
         <p class="text-gray-600 mt-1">系统概览和实时状态</p>
     </div>
     
-    <!-- Stats Cards -->
+    <!-- Stats Cards Row 1 -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <!-- Total Proxies -->
         <div class="bg-white rounded-lg shadow p-6">
@@ -60,6 +60,66 @@
                 </div>
                 <div class="bg-red-100 rounded-full p-3">
                     <i class="fas fa-exclamation-circle text-red-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Stats Cards Row 2 - Network Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <!-- Total Connections -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">当前连接数</p>
+                    <p class="text-3xl font-bold text-purple-600 mt-2" x-text="metrics.connections?.total || 0"></p>
+                </div>
+                <div class="bg-purple-100 rounded-full p-3">
+                    <i class="fas fa-link text-purple-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Upload Speed -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">上传速度</p>
+                    <p class="text-2xl font-bold text-orange-600 mt-2" x-text="metrics.network?.send_speed_formatted || '0 B/s'"></p>
+                </div>
+                <div class="bg-orange-100 rounded-full p-3">
+                    <i class="fas fa-arrow-up text-orange-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Download Speed -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">下载速度</p>
+                    <p class="text-2xl font-bold text-cyan-600 mt-2" x-text="metrics.network?.recv_speed_formatted || '0 B/s'"></p>
+                </div>
+                <div class="bg-cyan-100 rounded-full p-3">
+                    <i class="fas fa-arrow-down text-cyan-600 text-2xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Total Traffic -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">总流量</p>
+                    <p class="text-lg font-bold text-gray-600 mt-2">
+                        <span class="text-orange-500">↑</span> <span x-text="metrics.network?.total_sent_formatted || '0 B'"></span>
+                    </p>
+                    <p class="text-lg font-bold text-gray-600">
+                        <span class="text-cyan-500">↓</span> <span x-text="metrics.network?.total_recv_formatted || '0 B'"></span>
+                    </p>
+                </div>
+                <div class="bg-gray-100 rounded-full p-3">
+                    <i class="fas fa-exchange-alt text-gray-600 text-2xl"></i>
                 </div>
             </div>
         </div>
@@ -169,6 +229,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">端口</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">上游代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">连接数</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">监控状态</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">健康状态</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最后检查</th>
@@ -177,7 +238,7 @@
                 <tbody class="bg-white divide-y divide-gray-200">
                     <template x-if="proxies.length === 0">
                         <tr>
-                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                            <td colspan="7" class="px-6 py-8 text-center text-gray-500">
                                 <i class="fas fa-inbox text-4xl mb-2"></i>
                                 <p>暂无代理配置</p>
                             </td>
@@ -193,7 +254,16 @@
                                 <span class="text-sm text-gray-900" x-text="proxy.name"></span>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span class="text-sm text-gray-600" x-text="proxy.upstream.server + ':' + proxy.upstream.port"></span>
+                                <template x-if="proxy.upstream">
+                                    <span class="text-sm text-gray-600" x-text="proxy.upstream.server + ':' + proxy.upstream.port"></span>
+                                </template>
+                                <template x-if="!proxy.upstream">
+                                    <span class="text-sm text-gray-400">直连模式</span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800" 
+                                      x-text="(systemStatus.port_connections && systemStatus.port_connections[proxy.local_port]) || 0"></span>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span 
@@ -307,6 +377,7 @@
 function dashboardData() {
     return {
         systemStatus: {},
+        metrics: {},
         proxies: [],
         history: [],
         singboxLoading: false,
@@ -316,12 +387,17 @@ function dashboardData() {
             await this.loadProxies();
             await this.loadHistory();
             
-            // 自动刷新（每30秒）
+            // 系统状态刷新（每30秒）
             setInterval(() => {
                 this.loadSystemStatus();
                 this.loadProxies();
                 this.loadHistory();
             }, 30000);
+            
+            // 网络指标刷新（每3秒）
+            setInterval(() => {
+                this.loadMetrics();
+            }, 3000);
         },
         
         async loadSystemStatus() {
@@ -329,9 +405,24 @@ function dashboardData() {
                 const response = await fetch('/api/system/status');
                 if (response.ok) {
                     this.systemStatus = await response.json();
+                    // 同步 metrics 数据
+                    if (this.systemStatus.metrics) {
+                        this.metrics = this.systemStatus.metrics;
+                    }
                 }
             } catch (error) {
                 console.error('Failed to load system status:', error);
+            }
+        },
+        
+        async loadMetrics() {
+            try {
+                const response = await fetch('/api/system/metrics');
+                if (response.ok) {
+                    this.metrics = await response.json();
+                }
+            } catch (error) {
+                console.error('Failed to load metrics:', error);
             }
         },
         

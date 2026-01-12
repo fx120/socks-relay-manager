@@ -46,141 +46,136 @@
 
 ## 🚀 快速开始
 
-### 生产环境部署
+### 安装方式选择
 
-**推荐使用自动部署脚本，只需 3 步即可完成部署：**
+| 方式 | 适用场景 | 命令 |
+|-----|---------|------|
+| **在线安装** | 服务器可访问 GitHub | `sudo bash scripts/deploy.sh` |
+| **离线安装** | 服务器无法访问 GitHub（国内内网） | `sudo bash scripts/deploy_offline.sh` |
 
-1. **打包并上传代码到服务器**
+---
+
+### 在线安装（服务器可访问 GitHub）
+
+**只需 3 步即可完成部署：**
+
+1. **上传代码到服务器**
 ```bash
-# 在本地
-tar -czf proxy-relay.tar.gz src/ scripts/ requirements.txt pyproject.toml config.yaml.example docs/ README.md
+# 打包项目
+tar -czf proxy-relay.tar.gz src/ scripts/ docs/ requirements.txt pyproject.toml config.yaml.example README.md
+
+# 上传到服务器
 scp proxy-relay.tar.gz root@your-server:/tmp/
 ```
 
-2. **在服务器上运行部署脚本**
+2. **运行部署脚本**
 ```bash
-# SSH 登录服务器
 ssh root@your-server
 cd /tmp && tar -xzf proxy-relay.tar.gz
-
-# 运行自动部署（会自动安装所有依赖和配置服务）
 sudo bash scripts/deploy.sh
 ```
 
-3. **通过 Web 界面完成配置**
-```bash
-# 部署完成后，访问 Web 管理界面
-# http://your-server-ip:8080
-
-# 默认登录凭据：
-# 用户名: admin
-# 密码: admin123
-
-# ⚠️ 首次登录后请立即修改密码！
+3. **访问 Web 界面**
+```
+http://your-server-ip:8080
+用户名: admin
+密码: admin123
 ```
 
-**完成！** 现在可以通过 Web 界面配置 API 提供商和代理。
+⚠️ **首次登录后请立即修改密码！**
 
-📖 **部署后配置指南：**
-- [部署后配置步骤](docs/POST_DEPLOYMENT_GUIDE.md) - **必读！**
-- [完整部署指南](docs/DEPLOYMENT.md)
-- [生产环境检查清单](docs/PRODUCTION_CHECKLIST.md)
-- [系统更新指南](docs/UPDATE_GUIDE.md)
+---
+
+### 离线安装（服务器无法访问 GitHub）
+
+适用于国内内网服务器，sing-box 托管在 GitHub 无法直接下载的情况。
+
+#### 步骤一：创建离线部署包（在可访问 GitHub 的机器上）
+
+```bash
+# 进入项目目录
+cd proxy-relay
+
+# 运行打包脚本（自动下载 sing-box 并打包）
+bash scripts/pack_offline.sh
+
+# 可选参数：
+# -a amd64    只打包 amd64 架构
+# -a arm64    只打包 arm64 架构
+# -v 1.12.15  指定 sing-box 版本
+```
+
+生成文件：`proxy-relay-offline-YYYYMMDD.tar.gz`
+
+#### 步骤二：上传并部署
+
+```bash
+# 上传到服务器
+scp proxy-relay-offline-*.tar.gz root@your-server:/tmp/
+
+# 在服务器上部署
+ssh root@your-server
+cd /tmp
+tar -xzf proxy-relay-offline-*.tar.gz
+sudo bash scripts/deploy_offline.sh
+```
+
+#### 手动下载 sing-box（备选方案）
+
+如果打包脚本无法下载，可手动下载 sing-box：
+
+| 架构 | 下载链接 |
+|-----|---------|
+| amd64 | https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-amd64.tar.gz |
+| arm64 | https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-arm64.tar.gz |
+
+下载后放入 `bin/` 目录，目录结构：
+
+```
+proxy-relay/
+├── bin/
+│   └── sing-box-1.12.15-linux-amd64.tar.gz
+├── src/
+├── scripts/
+└── ...
+```
+
+然后运行 `sudo bash scripts/deploy_offline.sh`
 
 ---
 
 ### 开发环境部署
 
-#### 1. 安装依赖
+详见 [开发文档](docs/DEVELOPMENT.md)
 
-##### 使用 Poetry（推荐）
 ```bash
-# 安装 Poetry
-curl -sSL https://install.python-poetry.org | python3 -
+# 克隆项目
+git clone <your-repo-url>
+cd proxy-relay
 
-# 安装项目依赖
-poetry install
-```
-
-#### 使用 pip
-```bash
 # 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
+python3.11 -m venv venv
+source venv/bin/activate
 
 # 安装依赖
 pip install -r requirements.txt
-```
+pip install -e .
 
-### 2. 配置系统
-
-```bash
-# 复制配置文件模板
-cp config.yaml.example config.yaml
-
-# 编辑配置文件
-nano config.yaml  # 或使用你喜欢的编辑器
-```
-
-**重要配置项**：
-- 修改 `api_providers` 中的 `trade_no` 和 `secret` 为你的实际API凭据
-- 配置 `proxies` 部分，设置本地端口和初始上游代理
-- 根据需要调整 `monitoring` 参数
-
-### 3. 设置目录结构
-
-```bash
-# 开发环境（使用dev目录）
+# 设置开发目录
 ./scripts/setup_dev_directories.sh
 
-# 生产环境（使用系统目录，需要root权限）
-sudo ./scripts/setup_directories.sh
-```
+# 复制配置
+cp config.yaml.example dev/etc/proxy-relay/config.yaml
 
-### 4. 运行测试
-
-```bash
-# 运行所有测试
-pytest
-
-# 运行特定测试
-pytest tests/test_config_manager_basic.py
-
-# 查看测试覆盖率
-pytest --cov=src/proxy_relay
-```
-
-### 5. 启动服务
-
-#### 开发模式
-```bash
-# 使用Poetry
-poetry run proxy-relay start
-
-# 或直接使用Python
+# 启动服务
 python -m proxy_relay.cli start
 ```
 
-#### 生产模式（systemd服务）
-```bash
-# 安装为系统服务
-sudo systemctl enable proxy-relay
-sudo systemctl start proxy-relay
-
-# 查看服务状态
-sudo systemctl status proxy-relay
-```
-
-### 6. 访问Web界面
-
-打开浏览器访问: `http://localhost:8080`
-
-默认登录凭据:
-- 用户名: `admin`
-- 密码: `admin`
-
-⚠️ **安全提示**: 首次登录后请立即修改默认密码！
+📖 **更多文档：**
+- [完整安装指南](docs/INSTALLATION.md)
+- [部署后配置](docs/POST_DEPLOYMENT_GUIDE.md)
+- [故障排除](docs/TROUBLESHOOTING.md)
+- [系统更新](docs/UPDATE_GUIDE.md)
 
 ## ⚙️ 配置说明
 

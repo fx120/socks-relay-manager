@@ -22,6 +22,7 @@ from .proxy_manager import ProxyManager
 from .health_monitor import HealthMonitor
 from .database import Database
 from .auth import create_auth_dependency
+from .system_monitor import get_system_monitor
 from .models import (
     UpstreamProxy,
     ProxyConfig,
@@ -93,6 +94,7 @@ class ProxyUpdateModel(BaseModel):
     monitoring_enabled: Optional[bool] = None
     local_username: Optional[str] = None
     local_password: Optional[str] = None
+    fetch_from_api: Optional[bool] = False  # 是否从 API 获取上游代理
 
 
 class APIProviderUpdateModel(BaseModel):
@@ -152,6 +154,15 @@ class WebAPI:
         # 创建认证依赖
         config = config_manager._current_config or config_manager.load_config()
         self.auth_dependency = create_auth_dependency(config.system.web_auth)
+        
+        # 初始化系统监控并启动流量采集
+        system_monitor = get_system_monitor()
+        system_monitor.set_database(database)
+        
+        # 获取所有代理端口并启动流量采集
+        proxy_ports = [p.local_port for p in config.proxies]
+        if proxy_ports:
+            system_monitor.start_traffic_collector(proxy_ports, interval=60)
         
         # 创建FastAPI应用
         self.app = FastAPI(
@@ -223,6 +234,7 @@ class WebAPI:
         
         # 系统信息路由
         self.app.get("/api/system/status", dependencies=[Depends(self.auth_dependency)])(self.get_system_status)
+        self.app.get("/api/system/metrics", dependencies=[Depends(self.auth_dependency)])(self.get_system_metrics)
         self.app.get("/api/system/logs", dependencies=[Depends(self.auth_dependency)])(self.get_logs)
         self.app.get("/api/history", dependencies=[Depends(self.auth_dependency)])(self.get_history)
         
@@ -294,10 +306,19 @@ class WebAPI:
             # 获取监控状态
             monitoring_statuses = self.health_monitor.get_monitoring_status()
             
+            # 获取流量统计
+            traffic_stats = self.database.get_port_traffic_summary()
+            
+            # 获取连接数
+            system_monitor = get_system_monitor()
+            proxy_ports = [p.local_port for p in config.proxies]
+            port_connections = system_monitor.get_port_connections(proxy_ports)
+            
             # 构建响应
             proxies = []
             for proxy in config.proxies:
                 monitoring_status = monitoring_statuses.get(proxy.local_port)
+                traffic = traffic_stats.get(proxy.local_port, {})
                 
                 proxy_dict = {
                     "local_port": proxy.local_port,
@@ -313,7 +334,14 @@ class WebAPI:
                     "monitoring_enabled": proxy.monitoring_enabled,
                     "monitoring_status": None,
                     "local_username": proxy.local_username,
-                    "local_password": proxy.local_password
+                    "local_password": proxy.local_password,
+                    "connections": port_connections.get(proxy.local_port, 0),
+                    "traffic": {
+                        "total_sent": traffic.get('total_bytes_sent', 0),
+                        "total_recv": traffic.get('total_bytes_recv', 0),
+                        "total_sent_formatted": self._format_bytes(traffic.get('total_bytes_sent', 0)),
+                        "total_recv_formatted": self._format_bytes(traffic.get('total_bytes_recv', 0))
+                    }
                 }
                 
                 if monitoring_status:
@@ -335,6 +363,18 @@ class WebAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get proxies: {str(e)}"
             )
+    
+    @staticmethod
+    def _format_bytes(bytes_value: int) -> str:
+        """格式化字节数"""
+        if bytes_value < 1024:
+            return f"{bytes_value} B"
+        elif bytes_value < 1024 * 1024:
+            return f"{bytes_value / 1024:.1f} KB"
+        elif bytes_value < 1024 * 1024 * 1024:
+            return f"{bytes_value / (1024 * 1024):.2f} MB"
+        else:
+            return f"{bytes_value / (1024 * 1024 * 1024):.2f} GB"
     
     async def create_proxy(self, proxy: ProxyConfigModel):
         """
@@ -368,15 +408,35 @@ class WebAPI:
                         detail=f"API provider '{proxy.api_provider_id}' not found"
                     )
             
-            # 创建上游代理配置（如果提供）
+            # 创建上游代理配置
             upstream = None
             if proxy.upstream:
+                # 手动输入的上游代理
                 upstream = UpstreamProxy(
                     server=proxy.upstream.server,
                     port=proxy.upstream.port,
                     username=proxy.upstream.username,
                     password=proxy.upstream.password,
                     protocol=proxy.upstream.protocol
+                )
+            elif proxy.api_provider_id:
+                # 通过 API 获取上游代理
+                try:
+                    logger.info(f"Fetching upstream proxy from API provider: {proxy.api_provider_id}")
+                    upstream = self.proxy_manager.get_new_proxy_from_api(proxy.api_provider_id)
+                    logger.info(f"Got upstream proxy from API: {upstream.server}:{upstream.port}")
+                except Exception as api_error:
+                    logger.error(f"Failed to get proxy from API: {api_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Failed to get proxy from API provider: {str(api_error)}"
+                    )
+            
+            # 验证：如果开启监控但没有上游代理，报错
+            if proxy.monitoring_enabled and not upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot enable monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy or disable monitoring."
                 )
             
             # 创建新的代理配置
@@ -545,7 +605,9 @@ class WebAPI:
                     )
                 proxy_config.api_provider_id = proxy_update.api_provider_id
             
+            # 处理上游代理配置
             if proxy_update.upstream is not None:
+                # 手动输入的上游代理
                 proxy_config.upstream = UpstreamProxy(
                     server=proxy_update.upstream.server,
                     port=proxy_update.upstream.port,
@@ -553,9 +615,28 @@ class WebAPI:
                     password=proxy_update.upstream.password,
                     protocol=proxy_update.upstream.protocol
                 )
+            elif proxy_update.fetch_from_api and proxy_config.api_provider_id:
+                # 从 API 获取上游代理
+                try:
+                    logger.info(f"Fetching upstream proxy from API provider: {proxy_config.api_provider_id}")
+                    proxy_config.upstream = self.proxy_manager.get_new_proxy_from_api(proxy_config.api_provider_id)
+                    logger.info(f"Got upstream proxy from API: {proxy_config.upstream.server}:{proxy_config.upstream.port}")
+                except Exception as api_error:
+                    logger.error(f"Failed to get proxy from API: {api_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Failed to get proxy from API provider: {str(api_error)}"
+                    )
             
             if proxy_update.monitoring_enabled is not None:
                 proxy_config.monitoring_enabled = proxy_update.monitoring_enabled
+            
+            # 验证：如果开启监控但没有上游代理，报错
+            if proxy_config.monitoring_enabled and not proxy_config.upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot enable monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy or disable monitoring."
+                )
             
             # 保存配置
             self.config_manager.save_config(config)
@@ -665,6 +746,13 @@ class WebAPI:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Proxy with port {port} not found"
+                )
+            
+            # 验证：如果没有上游代理，不能启动监控
+            if not proxy_config.upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot start monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy first."
                 )
             
             # 启动监控
@@ -857,6 +945,13 @@ class WebAPI:
                     detail=f"Proxy with port {port} not found"
                 )
             
+            # 检查是否有上游代理配置
+            if not proxy_config.upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Proxy port {port} has no upstream configured. Please configure an upstream proxy first."
+                )
+            
             # 测试代理健康状态
             is_healthy, response_time_ms, error_message = self.health_monitor.check_proxy_health(
                 proxy_config.upstream
@@ -922,6 +1017,14 @@ class WebAPI:
             # 检查 sing-box 服务状态
             singbox_status = self._check_singbox_status()
             
+            # 获取系统监控数据
+            system_monitor = get_system_monitor()
+            system_metrics = system_monitor.get_system_metrics()
+            
+            # 获取各端口连接数
+            proxy_ports = [p.local_port for p in config.proxies]
+            port_connections = system_monitor.get_port_connections(proxy_ports)
+            
             return {
                 "status": "running",
                 "total_proxies": total_proxies,
@@ -935,7 +1038,9 @@ class WebAPI:
                     "log_level": config.system.log_level,
                     "check_interval": config.monitoring.check_interval,
                     "failure_threshold": config.monitoring.failure_threshold
-                }
+                },
+                "metrics": system_metrics,
+                "port_connections": port_connections
             }
             
         except Exception as e:
@@ -943,6 +1048,36 @@ class WebAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to get system status: {str(e)}"
+            )
+    
+    async def get_system_metrics(self):
+        """
+        获取系统实时监控指标
+        
+        Returns:
+            dict: 系统监控指标
+        """
+        try:
+            system_monitor = get_system_monitor()
+            metrics = system_monitor.get_system_metrics()
+            
+            # 获取各端口连接数
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            proxy_ports = [p.local_port for p in config.proxies]
+            port_connections = system_monitor.get_port_connections(proxy_ports)
+            
+            metrics["port_connections"] = port_connections
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Failed to get system metrics: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get system metrics: {str(e)}"
             )
     
     async def get_logs(self, limit: int = 100, offset: int = 0):
@@ -1406,25 +1541,25 @@ class WebAPI:
             if "system" in config_update:
                 system_update = config_update["system"]
                 if "web_port" in system_update:
-                    config.system.web_port = system_update["web_port"]
+                    config.system.web_port = int(system_update["web_port"])
                 if "log_level" in system_update:
-                    config.system.log_level = system_update["log_level"]
+                    config.system.log_level = str(system_update["log_level"])
                 if "log_file" in system_update:
-                    config.system.log_file = system_update["log_file"]
+                    config.system.log_file = str(system_update["log_file"])
                 if "database" in system_update:
-                    config.system.database = system_update["database"]
+                    config.system.database = str(system_update["database"])
             
             # 更新监控配置
             if "monitoring" in config_update:
                 monitoring_update = config_update["monitoring"]
                 if "check_interval" in monitoring_update:
-                    config.monitoring.check_interval = monitoring_update["check_interval"]
+                    config.monitoring.check_interval = int(monitoring_update["check_interval"])
                 if "failure_threshold" in monitoring_update:
-                    config.monitoring.failure_threshold = monitoring_update["failure_threshold"]
+                    config.monitoring.failure_threshold = int(monitoring_update["failure_threshold"])
                 if "check_timeout" in monitoring_update:
-                    config.monitoring.check_timeout = monitoring_update["check_timeout"]
+                    config.monitoring.check_timeout = int(monitoring_update["check_timeout"])
                 if "check_url" in monitoring_update:
-                    config.monitoring.check_url = monitoring_update["check_url"]
+                    config.monitoring.check_url = str(monitoring_update["check_url"])
             
             # 保存配置
             self.config_manager.save_config(config)

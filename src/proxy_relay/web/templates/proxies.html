@@ -29,6 +29,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">模式</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">上游代理</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">连接/流量</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">监控</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
                     </tr>
@@ -36,7 +37,7 @@
                 <tbody class="bg-white divide-y divide-gray-200">
                     <template x-if="proxies.length === 0">
                         <tr>
-                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                            <td colspan="7" class="px-6 py-8 text-center text-gray-500">
                                 <i class="fas fa-inbox text-4xl mb-2"></i>
                                 <p>暂无代理配置</p>
                                 <button 
@@ -79,6 +80,20 @@
                                 <template x-if="!proxy.upstream">
                                     <span class="text-sm text-gray-400">-</span>
                                 </template>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm">
+                                    <div class="flex items-center text-purple-600">
+                                        <i class="fas fa-link mr-1 text-xs"></i>
+                                        <span x-text="proxy.connections || 0"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        <span class="text-orange-500">↑</span> <span x-text="proxy.traffic?.total_sent_formatted || '0 B'"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500">
+                                        <span class="text-cyan-500">↓</span> <span x-text="proxy.traffic?.total_recv_formatted || '0 B'"></span>
+                                    </div>
+                                </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span 
@@ -503,6 +518,7 @@ function proxiesData() {
                             return;
                         }
                         data.api_provider_id = this.formData.api_provider_id;
+                        data.fetch_from_api = true;  // 告诉后端从 API 获取上游代理
                         data.upstream = null;
                     } else {
                         // 手动模式
@@ -512,6 +528,7 @@ function proxiesData() {
                             return;
                         }
                         data.api_provider_id = null;
+                        data.fetch_from_api = false;
                         data.upstream = {
                             server: this.formData.upstream.server,
                             port: parseInt(this.formData.upstream.port),
@@ -523,6 +540,7 @@ function proxiesData() {
                 } else {
                     // 直连模式
                     data.api_provider_id = null;
+                    data.fetch_from_api = false;
                     data.upstream = null;
                 }
                 

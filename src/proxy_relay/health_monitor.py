@@ -254,12 +254,18 @@ class HealthMonitor:
         Returns:
             str: 代理URL（格式：protocol://[username:password@]server:port）
         """
+        # 对于 SOCKS5 代理，使用 socks5h:// 让代理服务器解析 DNS
+        # 这样可以避免本地 DNS 泄露，并且更可靠
+        protocol = upstream.protocol
+        if protocol == "socks5":
+            protocol = "socks5h"
+        
         if upstream.username and upstream.password:
             # 带认证的代理URL
-            return f"{upstream.protocol}://{upstream.username}:{upstream.password}@{upstream.server}:{upstream.port}"
+            return f"{protocol}://{upstream.username}:{upstream.password}@{upstream.server}:{upstream.port}"
         else:
             # 不带认证的代理URL
-            return f"{upstream.protocol}://{upstream.server}:{upstream.port}"
+            return f"{protocol}://{upstream.server}:{upstream.port}"
     
     def _trigger_proxy_switch(self, port: int) -> None:
         """

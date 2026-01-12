@@ -90,6 +90,29 @@ class Database:
                 )
             """)
             
+            # 创建 port_traffic 表 - 端口流量统计
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS port_traffic (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    local_port INTEGER NOT NULL,
+                    bytes_sent INTEGER DEFAULT 0,
+                    bytes_recv INTEGER DEFAULT 0,
+                    connections INTEGER DEFAULT 0,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 创建 port_traffic_summary 表 - 端口流量汇总
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS port_traffic_summary (
+                    local_port INTEGER PRIMARY KEY,
+                    total_bytes_sent INTEGER DEFAULT 0,
+                    total_bytes_recv INTEGER DEFAULT 0,
+                    total_connections INTEGER DEFAULT 0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # 创建索引以提高查询性能
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_switch_history_port 
@@ -109,6 +132,16 @@ class Database:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_health_check_timestamp 
                 ON health_check_log(timestamp)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_port_traffic_port 
+                ON port_traffic(local_port)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_port_traffic_timestamp 
+                ON port_traffic(timestamp)
             """)
             
             conn.commit()
@@ -478,3 +511,115 @@ class Database:
             except Exception:
                 conn.rollback()
                 raise
+
+    # ==================== 端口流量统计操作 ====================
+    
+    def update_port_traffic(
+        self,
+        local_port: int,
+        bytes_sent: int,
+        bytes_recv: int,
+        connections: int = 0
+    ) -> None:
+        """
+        更新端口流量统计（累加到汇总表）
+        
+        Args:
+            local_port: 本地端口
+            bytes_sent: 发送字节数（增量）
+            bytes_recv: 接收字节数（增量）
+            connections: 连接数
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 更新汇总表
+            cursor.execute("""
+                INSERT INTO port_traffic_summary (
+                    local_port, total_bytes_sent, total_bytes_recv, 
+                    total_connections, last_updated
+                ) VALUES (?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(local_port) DO UPDATE SET
+                    total_bytes_sent = total_bytes_sent + excluded.total_bytes_sent,
+                    total_bytes_recv = total_bytes_recv + excluded.total_bytes_recv,
+                    total_connections = excluded.total_connections,
+                    last_updated = datetime('now')
+            """, (local_port, bytes_sent, bytes_recv, connections))
+            
+            conn.commit()
+    
+    def get_port_traffic_summary(self, local_port: Optional[int] = None) -> Dict[int, Dict[str, Any]]:
+        """
+        获取端口流量汇总
+        
+        Args:
+            local_port: 本地端口（可选，None表示获取所有端口）
+            
+        Returns:
+            Dict[int, Dict[str, Any]]: {端口: 流量统计}
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if local_port is not None:
+                cursor.execute("""
+                    SELECT * FROM port_traffic_summary
+                    WHERE local_port = ?
+                """, (local_port,))
+            else:
+                cursor.execute("SELECT * FROM port_traffic_summary")
+            
+            rows = cursor.fetchall()
+            result = {}
+            for row in rows:
+                result[row['local_port']] = {
+                    'total_bytes_sent': row['total_bytes_sent'],
+                    'total_bytes_recv': row['total_bytes_recv'],
+                    'total_connections': row['total_connections'],
+                    'last_updated': row['last_updated']
+                }
+            return result
+    
+    def reset_port_traffic(self, local_port: int) -> bool:
+        """
+        重置端口流量统计
+        
+        Args:
+            local_port: 本地端口
+            
+        Returns:
+            bool: 是否成功
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE port_traffic_summary
+                SET total_bytes_sent = 0, total_bytes_recv = 0, 
+                    total_connections = 0, last_updated = datetime('now')
+                WHERE local_port = ?
+            """, (local_port,))
+            
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def delete_port_traffic(self, local_port: int) -> bool:
+        """
+        删除端口流量统计
+        
+        Args:
+            local_port: 本地端口
+            
+        Returns:
+            bool: 是否成功
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM port_traffic_summary
+                WHERE local_port = ?
+            """, (local_port,))
+            
+            conn.commit()
+            return cursor.rowcount > 0

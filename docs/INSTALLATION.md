@@ -1,25 +1,35 @@
 # 安装指南
 
-本指南提供代理中转系统的详细安装说明，包括自动安装和手动安装两种方式。
+本指南提供代理中转系统的详细安装说明，支持在线安装和离线安装两种方式。
 
 ## 目录
 
-- [快速安装（推荐）](#快速安装推荐)
+- [安装方式选择](#安装方式选择)
+- [在线安装（推荐）](#在线安装推荐)
+- [离线安装](#离线安装)
 - [手动安装](#手动安装)
 - [配置向导](#配置向导)
 - [验证安装](#验证安装)
 - [下一步](#下一步)
 - [故障排查](#故障排查)
 
-## 快速安装（推荐）
+## 安装方式选择
 
-使用自动安装脚本可以快速完成系统安装。
+| 安装方式 | 适用场景 | 特点 |
+|---------|---------|------|
+| **在线安装** | 服务器可访问 GitHub | 一键部署，自动下载 sing-box |
+| **离线安装** | 服务器无法访问 GitHub（如国内内网） | 需预先打包，包含 sing-box 二进制文件 |
+| **手动安装** | 需要自定义安装过程 | 灵活但步骤较多 |
+
+## 在线安装（推荐）
+
+适用于服务器可以访问 GitHub 的环境，使用自动安装脚本一键完成部署。
 
 ### 前提条件
 
 - Debian 11/12 或 Ubuntu 20.04/22.04
 - root 或 sudo 权限
-- 稳定的互联网连接
+- 可访问 GitHub（用于下载 sing-box）
 
 ### 安装步骤
 
@@ -36,60 +46,120 @@ tar -xzf proxy-relay.tar.gz
 cd proxy-relay
 ```
 
-2. **运行安装脚本**
+2. **运行部署脚本**
 
 ```bash
-sudo ./scripts/install.sh
+sudo bash scripts/deploy.sh
 ```
 
-安装脚本会自动完成以下操作：
+部署脚本会自动完成以下操作：
 - ✓ 检查系统要求
-- ✓ 安装 Python 3.11+（如果需要）
-- ✓ 安装 sing-box
-- ✓ 安装系统依赖
-- ✓ 创建系统用户和组
-- ✓ 创建目录结构
-- ✓ 复制应用文件
-- ✓ 设置文件权限
-- ✓ 创建 Python 虚拟环境
-- ✓ 安装 Python 依赖
-- ✓ 设置配置文件
-- ✓ 安装 systemd 服务
-- ✓ 启用服务（可选启动）
+- ✓ 安装系统依赖（Python 3.11、sqlite3 等）
+- ✓ 从 GitHub 下载并安装 sing-box
+- ✓ 创建系统用户和目录结构
+- ✓ 部署应用代码
+- ✓ 创建 Python 虚拟环境并安装依赖
+- ✓ 生成默认配置文件
+- ✓ 安装并启动 systemd 服务
 
-3. **配置系统**
+3. **访问 Web 界面**
 
-安装完成后，编辑配置文件：
+部署完成后，访问：`http://your-server-ip:8080`
+
+默认登录信息：
+- 用户名：`admin`
+- 密码：`admin123`
+
+⚠️ **首次登录后请立即修改密码！**
+
+---
+
+## 离线安装
+
+适用于服务器无法访问 GitHub 的环境（如国内内网服务器）。
+
+### 原理
+
+由于 sing-box 托管在 GitHub，部分网络环境无法直接下载。离线安装方案将 sing-box 二进制文件预先打包，避免部署时的网络问题。
+
+### 步骤一：创建离线部署包（在可访问 GitHub 的机器上）
 
 ```bash
-sudo nano /etc/proxy-relay/config.yaml
+# 进入项目目录
+cd proxy-relay
+
+# 运行打包脚本（会自动下载 sing-box）
+bash scripts/pack_offline.sh
 ```
 
-至少需要配置：
-- API 提供商的认证信息（trade_no, secret）
-- Web 界面的用户名和密码
-- 代理端口配置
-
-4. **启动服务**
+打包选项：
 
 ```bash
-# 如果安装时没有启动，现在启动
-sudo systemctl start proxy-relay
+# 打包所有架构（amd64 + arm64）
+bash scripts/pack_offline.sh
 
-# 等待配置生成后启动 sing-box
-sleep 5
-sudo systemctl start sing-box
+# 只打包 amd64 架构
+bash scripts/pack_offline.sh -a amd64
 
-# 检查状态
-sudo systemctl status proxy-relay
-sudo systemctl status sing-box
+# 只打包 arm64 架构
+bash scripts/pack_offline.sh -a arm64
+
+# 指定 sing-box 版本
+bash scripts/pack_offline.sh -v 1.12.15
+
+# 指定输出目录
+bash scripts/pack_offline.sh -o /path/to/output
 ```
 
-5. **访问 Web 界面**
+打包完成后会生成：`proxy-relay-offline-YYYYMMDD.tar.gz`
 
-打开浏览器访问：`http://your-server-ip:8080`
+### 步骤二：上传到目标服务器
 
-默认用户名：`admin`（在配置文件中设置）
+```bash
+scp proxy-relay-offline-*.tar.gz user@server:/tmp/
+```
+
+### 步骤三：在目标服务器上部署
+
+```bash
+# 解压部署包
+cd /tmp
+tar -xzf proxy-relay-offline-*.tar.gz
+
+# 运行离线部署脚本
+sudo bash scripts/deploy_offline.sh
+```
+
+### 手动准备 sing-box（可选）
+
+如果打包脚本无法下载 sing-box，可以手动下载：
+
+**sing-box 下载地址：**
+- GitHub Releases: https://github.com/SagerNet/sing-box/releases
+- 当前推荐版本: `1.12.15`
+
+**下载链接：**
+- amd64: `https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-amd64.tar.gz`
+- arm64: `https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-arm64.tar.gz`
+
+**离线包目录结构：**
+
+```
+proxy-relay-offline/
+├── bin/                              # sing-box 二进制文件目录
+│   ├── sing-box-1.12.15-linux-amd64.tar.gz   # amd64 架构
+│   └── sing-box-1.12.15-linux-arm64.tar.gz   # arm64 架构
+├── src/                              # 应用源代码
+├── scripts/                          # 部署脚本
+├── docs/                             # 文档
+├── requirements.txt
+├── pyproject.toml
+└── INSTALL.md                        # 安装说明
+```
+
+手动下载后，将 sing-box 压缩包放入 `bin/` 目录，然后运行部署脚本即可。
+
+---
 
 ## 手动安装
 
@@ -542,15 +612,40 @@ sudo apt update
 sudo apt install python3.11 python3.11-venv python3.11-dev
 ```
 
-**问题：sing-box 下载失败**
+**问题：sing-box 下载失败（GitHub 无法访问）**
+
+这是国内服务器常见问题，有以下解决方案：
+
+**方案一：使用离线安装（推荐）**
+
+参考 [离线安装](#离线安装) 章节，在可访问 GitHub 的机器上打包后上传部署。
+
+**方案二：手动下载 sing-box**
+
+1. 在可访问 GitHub 的机器上下载：
+   - amd64: https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-amd64.tar.gz
+   - arm64: https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-arm64.tar.gz
+
+2. 上传到服务器并安装：
+```bash
+# 上传文件
+scp sing-box-1.12.15-linux-amd64.tar.gz user@server:/tmp/
+
+# 在服务器上安装
+cd /tmp
+tar -xzf sing-box-1.12.15-linux-amd64.tar.gz
+sudo mv sing-box-1.12.15-linux-amd64/sing-box /usr/local/bin/
+sudo chmod +x /usr/local/bin/sing-box
+
+# 验证
+sing-box version
+```
+
+**方案三：使用镜像站点**
 
 ```bash
-# 手动下载并安装
-# 访问 https://github.com/SagerNet/sing-box/releases
-# 下载适合你系统的版本
-
-# 或使用镜像站点
-wget https://mirror.ghproxy.com/https://github.com/SagerNet/sing-box/releases/download/v1.8.0/sing-box-1.8.0-linux-amd64.tar.gz
+# 使用 ghproxy 镜像
+wget https://mirror.ghproxy.com/https://github.com/SagerNet/sing-box/releases/download/v1.12.15/sing-box-1.12.15-linux-amd64.tar.gz
 ```
 
 **问题：权限错误**

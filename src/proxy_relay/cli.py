@@ -709,6 +709,119 @@ def switch(ctx, port, api_provider):
         sys.exit(1)
 
 
+@cli.command()
+@click.argument('vless_input')
+@click.argument('port', type=int)
+@click.option('--name', '-n', help='Proxy name (optional)')
+@click.option('--monitoring/--no-monitoring', default=False, help='Enable monitoring for this proxy')
+@click.pass_context
+def import_vless(ctx, vless_input, port, name, monitoring):
+    """Import VLESS proxy configuration from URL or JSON.
+    
+    This command parses a VLESS connection string (URL or JSON) and adds it
+    to the configuration as a new proxy on the specified port.
+    
+    Args:
+        vless_input: VLESS URL (vless://...) or JSON configuration
+        port: Local port to bind this proxy to
+        name: Optional name for the proxy (default: auto-generated)
+        monitoring: Enable automatic health monitoring
+    
+    Examples:
+        proxy-relay import-vless "vless://uuid@server:port?..." 1080
+        proxy-relay import-vless '{"server":"...","uuid":"..."}' 1081 -n "My Proxy"
+    """
+    config_path = ctx.obj['config_path']
+    logger = get_logger(__name__)
+    
+    try:
+        click.echo(f"Importing VLESS proxy configuration...")
+        logger.info(f"Importing VLESS proxy for port {port}")
+        
+        # 解析 VLESS 配置
+        from .vless_parser import VLESSParser, VLESSParseError
+        
+        try:
+            upstream = VLESSParser.parse(vless_input)
+            click.echo(f"✓ VLESS configuration parsed successfully")
+            click.echo(f"  Server: {upstream.server}:{upstream.port}")
+            click.echo(f"  Network: {upstream.network}")
+            if upstream.tls:
+                click.echo(f"  TLS: enabled")
+                if upstream.sni:
+                    click.echo(f"  SNI: {upstream.sni}")
+            logger.info(f"Parsed VLESS proxy: {upstream.server}:{upstream.port}")
+        except VLESSParseError as e:
+            click.echo(f"✗ Failed to parse VLESS configuration: {e}", err=True)
+            logger.error(f"Failed to parse VLESS configuration: {e}")
+            sys.exit(1)
+        
+        # 加载现有配置
+        config_manager = ConfigManager(config_path)
+        config = config_manager.load_config()
+        
+        # 检查端口是否已被使用
+        for proxy in config.proxies:
+            if proxy.local_port == port:
+                click.echo(f"✗ Error: Port {port} is already in use", err=True)
+                logger.error(f"Port {port} is already in use")
+                sys.exit(1)
+        
+        # 生成代理名称
+        if not name:
+            name = f"VLESS-{upstream.server}-{port}"
+        
+        # 创建新的代理配置
+        from .models import ProxyConfig
+        new_proxy = ProxyConfig(
+            local_port=port,
+            name=name,
+            upstream=upstream,
+            monitoring_enabled=monitoring
+        )
+        
+        # 添加到配置
+        config.proxies.append(new_proxy)
+        
+        # 保存配置
+        config_manager.save_config(config)
+        click.echo(f"✓ Configuration saved")
+        logger.info(f"VLESS proxy configuration saved for port {port}")
+        
+        # 应用配置到 sing-box
+        click.echo(f"Applying configuration to sing-box...")
+        proxy_manager = ProxyManager(config_manager)
+        
+        try:
+            proxy_manager.apply_singbox_config()
+            click.echo(f"✓ sing-box configuration applied successfully")
+            logger.info(f"sing-box configuration applied")
+        except Exception as e:
+            click.echo(f"✗ Failed to apply sing-box configuration: {e}", err=True)
+            logger.error(f"Failed to apply sing-box configuration: {e}")
+            # 回滚配置
+            config.proxies.remove(new_proxy)
+            config_manager.save_config(config)
+            sys.exit(1)
+        
+        # 显示成功信息
+        click.echo(f"\n✓ VLESS proxy imported successfully!")
+        click.echo(f"  Local Port: {port}")
+        click.echo(f"  Name: {name}")
+        click.echo(f"  Upstream: {upstream.server}:{upstream.port}")
+        click.echo(f"  Monitoring: {'enabled' if monitoring else 'disabled'}")
+        click.echo(f"\nYou can now use this proxy at: socks5://127.0.0.1:{port}")
+        
+    except FileNotFoundError as e:
+        click.echo(f"✗ Error: Configuration file not found: {config_path}", err=True)
+        logger.error(f"Configuration file not found: {e}")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"✗ Unexpected error: {e}", err=True)
+        logger.exception(f"Unexpected error during VLESS import: {e}")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for CLI."""
     cli(obj={})

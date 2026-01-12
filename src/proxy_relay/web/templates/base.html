@@ -45,7 +45,13 @@
                     
                     <a href="/proxies" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/proxies' %}bg-gray-700{% endif %}">
                         <i class="fas fa-server w-5"></i>
-                        <span class="ml-3">代理管理</span>
+                        <span class="ml-3">本地代理</span>
+                    </a>
+                    
+                    <a href="/upstream-proxies" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/upstream-proxies' %}bg-gray-700{% endif %}">
+                        <i class="fas fa-cloud w-5"></i>
+                        <span class="ml-3">出口代理池</span>
+                        <span class="ml-auto text-xs bg-blue-500 px-2 py-1 rounded">v1.2</span>
                     </a>
                     
                     <a href="/monitoring" class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-700 transition {% if request.path == '/monitoring' %}bg-gray-700{% endif %}">

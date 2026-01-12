@@ -89,31 +89,122 @@ class ProxyManager:
             
             inbounds.append(inbound)
             
+            # 解析上游代理：优先使用 upstream_id，其次使用 upstream
+            upstream_proxy = None
+            if proxy.upstream_id:
+                # 从出口代理池中查找
+                upstream_proxy = self._get_upstream_by_id(proxy.upstream_id)
+                if not upstream_proxy:
+                    logger.error(f"Upstream proxy with id '{proxy.upstream_id}' not found for proxy {proxy.name}")
+                    raise RuntimeError(f"Upstream proxy with id '{proxy.upstream_id}' not found")
+                logger.debug(f"Resolved upstream_id '{proxy.upstream_id}' to {upstream_proxy.server}:{upstream_proxy.port}")
+            elif proxy.upstream:
+                # 使用直接配置的上游代理（向后兼容）
+                upstream_proxy = proxy.upstream
+                logger.debug(f"Using directly configured upstream for proxy {proxy.name}")
+            
             # 生成outbound配置
             outbound_tag = f"upstream-{proxy.local_port}"
             
-            if proxy.upstream is None:
+            if upstream_proxy is None:
                 # Direct 模式：直接连接，不使用上游代理
                 outbound = {
                     "type": "direct",
                     "tag": outbound_tag
                 }
                 logger.debug(f"Using direct mode for proxy {proxy.name}")
+            elif upstream_proxy.protocol == "vless":
+                # VLESS 协议配置
+                outbound = {
+                    "type": "vless",
+                    "tag": outbound_tag,
+                    "server": upstream_proxy.server,
+                    "server_port": upstream_proxy.port,
+                    "uuid": upstream_proxy.uuid
+                }
+                
+                # Flow 字段（仅在有值时添加）
+                if upstream_proxy.flow:
+                    outbound["flow"] = upstream_proxy.flow
+                
+                # TLS 配置
+                if upstream_proxy.tls:
+                    tls_config = {
+                        "enabled": True
+                    }
+                    
+                    # Reality 配置
+                    if upstream_proxy.reality:
+                        reality_config = {
+                            "enabled": True
+                        }
+                        if upstream_proxy.reality_public_key:
+                            reality_config["public_key"] = upstream_proxy.reality_public_key
+                        if upstream_proxy.reality_short_id:
+                            reality_config["short_id"] = upstream_proxy.reality_short_id
+                        
+                        # Reality 模式下，server_name 必须设置
+                        # 优先使用 reality_server_name，其次使用 sni
+                        server_name = upstream_proxy.reality_server_name or upstream_proxy.sni
+                        if server_name:
+                            tls_config["server_name"] = server_name
+                        
+                        tls_config["reality"] = reality_config
+                        
+                        # uTLS fingerprint (Reality 通常需要)
+                        if upstream_proxy.reality_fingerprint:
+                            tls_config["utls"] = {
+                                "enabled": True,
+                                "fingerprint": upstream_proxy.reality_fingerprint
+                            }
+                        
+                        logger.debug(f"Enabled Reality for proxy {proxy.name} with server_name={server_name}")
+                    else:
+                        # 非 Reality 模式的 TLS 配置
+                        if upstream_proxy.sni:
+                            tls_config["server_name"] = upstream_proxy.sni
+                        if upstream_proxy.alpn:
+                            tls_config["alpn"] = upstream_proxy.alpn
+                    
+                    outbound["tls"] = tls_config
+                
+                # 传输层配置
+                if upstream_proxy.network and upstream_proxy.network != "tcp":
+                    transport_config = {
+                        "type": upstream_proxy.network
+                    }
+                    
+                    if upstream_proxy.network == "ws":
+                        # WebSocket 配置
+                        if upstream_proxy.ws_path:
+                            transport_config["path"] = upstream_proxy.ws_path
+                        if upstream_proxy.ws_host:
+                            transport_config["headers"] = {
+                                "Host": upstream_proxy.ws_host
+                            }
+                    elif upstream_proxy.network == "grpc":
+                        # gRPC 配置
+                        if upstream_proxy.grpc_service_name:
+                            transport_config["service_name"] = upstream_proxy.grpc_service_name
+                    
+                    outbound["transport"] = transport_config
+                
+                logger.debug(f"Using VLESS protocol for proxy {proxy.name}")
             else:
-                # 上游代理模式
+                # 其他代理协议（SOCKS5, HTTP, HTTPS）
                 # sing-box 使用 "socks" 而不是 "socks5"
-                outbound_type = "socks" if proxy.upstream.protocol == "socks5" else proxy.upstream.protocol
+                outbound_type = "socks" if upstream_proxy.protocol == "socks5" else upstream_proxy.protocol
                 outbound = {
                     "type": outbound_type,
                     "tag": outbound_tag,
-                    "server": proxy.upstream.server,
-                    "server_port": proxy.upstream.port
+                    "server": upstream_proxy.server,
+                    "server_port": upstream_proxy.port
                 }
                 
                 # 如果需要认证，添加认证信息
-                if proxy.upstream.username and proxy.upstream.password:
-                    outbound["username"] = proxy.upstream.username
-                    outbound["password"] = proxy.upstream.password
+                if upstream_proxy.username and upstream_proxy.password:
+                    outbound["username"] = upstream_proxy.username
+                    outbound["password"] = upstream_proxy.password
                     logger.debug(f"Added upstream authentication for proxy {proxy.name}")
             
             outbounds.append(outbound)
@@ -141,6 +232,25 @@ class ProxyManager:
         }
         
         return singbox_config
+    
+    def _get_upstream_by_id(self, upstream_id: str) -> Optional[UpstreamProxy]:
+        """
+        根据 ID 从出口代理池中获取上游代理
+        
+        Args:
+            upstream_id: 出口代理池 ID
+            
+        Returns:
+            Optional[UpstreamProxy]: 上游代理配置，如果不存在返回 None
+        """
+        if not self.config or not self.config.upstream_proxies:
+            return None
+        
+        for upstream_pool in self.config.upstream_proxies:
+            if upstream_pool.id == upstream_id and upstream_pool.enabled:
+                return upstream_pool.proxy
+        
+        return None
     
     def apply_singbox_config(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """

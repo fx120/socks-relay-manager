@@ -1,0 +1,130 @@
+========================================
+  Proxy Relay System v1.2.0
+  安装包信息
+========================================
+
+版本信息
+--------
+版本号: v1.2.0
+发布日期: 2026-01-12
+类型: 功能更新（Feature Release）
+
+安装包信息
+----------
+文件名: proxy-relay-v1.2.0.tar.gz
+大小: 220 KB
+MD5: 0473e4928d2ae6bf0459279430be8fb3
+
+主要新特性
+----------
+✨ 出口代理池管理
+  - 集中管理所有出口代理
+  - 支持多个本地代理复用同一出口代理
+  - Web 界面完整支持
+
+✨ 完整的协议支持
+  - SOCKS5（带认证）
+  - HTTP/HTTPS
+  - VLESS（TCP/WebSocket/gRPC/HTTP2）
+
+✨ 向后兼容
+  - 完全兼容 v1.1.0 配置格式
+  - 支持混合使用新旧方式
+  - 无需强制迁移
+
+包含内容
+--------
+- src/                    # 源代码
+- scripts/                # 安装和更新脚本
+- docs/                   # 完整文档
+- tests/                  # 测试文件
+- config.yaml.example     # 配置示例
+- requirements.txt        # Python 依赖
+- proxy-relay.service     # systemd 服务文件
+- V1.2.0_INSTALL.md       # 安装说明
+
+安装方式
+--------
+
+方式 1: 从 v1.1.0 升级
+  tar -xzf proxy-relay-v1.2.0.tar.gz
+  cd proxy-relay
+  sudo bash scripts/update_v1.2.0.sh
+
+方式 2: 全新安装
+  tar -xzf proxy-relay-v1.2.0.tar.gz
+  cd proxy-relay
+  sudo bash scripts/install.sh
+
+验证安装
+--------
+1. 检查服务状态
+   sudo systemctl status proxy-relay
+   sudo systemctl status sing-box
+
+2. 访问 Web 界面
+   http://your-server-ip:8080
+
+3. 查看新功能
+   访问 /upstream-proxies 页面
+
+文档位置
+--------
+安装后文档位于: /opt/proxy-relay/docs/
+
+- V1.2.0_QUICKSTART.md        # 快速开始
+- V1.2.0_RELEASE_NOTES.md     # 发布说明
+- UPSTREAM_POOL_ARCHITECTURE.md  # 架构设计
+- V1.2.0_COMPLETE.md          # 完成报告
+
+重要提示
+--------
+⚠️ 更新前会自动备份配置和数据库
+⚠️ 完全向后兼容，无需修改现有配置
+⚠️ 建议先在测试环境验证
+
+系统要求
+--------
+- 操作系统: Linux (Ubuntu 20.04+, CentOS 7+)
+- Python: 3.8+
+- sing-box: 最新版本
+- 内存: 512MB+
+- 磁盘: 100MB+
+
+更新内容
+--------
+修改的文件:
+  - src/proxy_relay/models.py
+  - src/proxy_relay/config_manager.py
+  - src/proxy_relay/proxy_manager.py
+  - src/proxy_relay/database.py
+  - src/proxy_relay/web_api.py
+  - src/proxy_relay/web/templates/base.html
+  - config.yaml.example
+
+新增的文件:
+  - src/proxy_relay/web/templates/upstream_proxies.html
+  - tests/test_upstream_proxy_pool.py
+  - docs/V1.2.0_*.md (5个文档)
+  - scripts/update_v1.2.0.sh
+
+测试状态
+--------
+✅ 单元测试: 7/7 通过
+✅ 核心功能: 已验证
+✅ 向后兼容: 已验证
+✅ Web 界面: 已验证
+
+获取帮助
+--------
+- 文档: /opt/proxy-relay/docs/
+- 日志: /var/log/proxy-relay/app.log
+- Issue: GitHub Issues
+
+许可证
+------
+MIT License
+
+========================================
+  准备就绪，可以部署！
+========================================

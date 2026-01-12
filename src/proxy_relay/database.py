@@ -43,6 +43,50 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
+            # 创建 upstream_proxies 表（v1.2.0 新增，v1.2.1 添加 Reality 支持）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS upstream_proxies (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    description TEXT,
+                    tags TEXT,
+                    server TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    protocol TEXT NOT NULL,
+                    username TEXT,
+                    password TEXT,
+                    uuid TEXT,
+                    flow TEXT,
+                    encryption TEXT,
+                    network TEXT,
+                    tls BOOLEAN,
+                    sni TEXT,
+                    alpn TEXT,
+                    reality BOOLEAN DEFAULT 0,
+                    reality_public_key TEXT,
+                    reality_short_id TEXT,
+                    reality_server_name TEXT,
+                    reality_fingerprint TEXT,
+                    ws_path TEXT,
+                    ws_host TEXT,
+                    grpc_service_name TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 创建 upstream_usage 表 - 记录出口代理使用情况
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS upstream_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    upstream_id TEXT NOT NULL,
+                    local_port INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (upstream_id) REFERENCES upstream_proxies(id)
+                )
+            """)
+            
             # 创建 proxy_switch_history 表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS proxy_switch_history (
@@ -114,6 +158,16 @@ class Database:
             """)
             
             # 创建索引以提高查询性能
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_upstream_usage_upstream_id 
+                ON upstream_usage(upstream_id)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_upstream_usage_timestamp 
+                ON upstream_usage(timestamp)
+            """)
+            
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_switch_history_port 
                 ON proxy_switch_history(local_port)
@@ -623,3 +677,45 @@ class Database:
             
             conn.commit()
             return cursor.rowcount > 0
+
+    # ==================== 出口代理池操作 (v1.2.0) ====================
+    
+    def get_upstream_usage_count(self, upstream_id: str) -> int:
+        """
+        获取出口代理的使用次数
+        
+        Args:
+            upstream_id: 出口代理 ID
+            
+        Returns:
+            int: 使用次数
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM upstream_usage
+                WHERE upstream_id = ?
+            """, (upstream_id,))
+            
+            row = cursor.fetchone()
+            return row['count'] if row else 0
+    
+    def record_upstream_usage(self, upstream_id: str, local_port: int) -> None:
+        """
+        记录出口代理使用
+        
+        Args:
+            upstream_id: 出口代理 ID
+            local_port: 本地端口
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO upstream_usage (upstream_id, local_port, timestamp)
+                VALUES (?, ?, datetime('now'))
+            """, (upstream_id, local_port))
+            
+            conn.commit()
+            logger.debug(f"Recorded upstream usage: upstream_id={upstream_id}, local_port={local_port}")

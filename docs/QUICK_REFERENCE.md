@@ -87,6 +87,15 @@ sudo journalctl -u proxy-relay -f
 sudo nano /etc/proxy-relay/config.yaml
 sudo systemctl restart proxy-relay
 
+# VLESS 代理导入
+proxy-relay import-vless "vless://uuid@server:port?..." 1080
+proxy-relay import-vless "vless://..." 1080 --name "My Proxy" --monitoring
+
+# 代理管理
+proxy-relay list                    # 列出所有代理
+proxy-relay status                  # 查看状态
+proxy-relay switch 1080             # 手动切换代理
+
 # 数据库查询
 sudo -u proxy-relay sqlite3 /var/lib/proxy-relay/data.db
 SELECT * FROM proxy_switch_history ORDER BY timestamp DESC LIMIT 10;
@@ -95,6 +104,7 @@ SELECT * FROM proxy_switch_history ORDER BY timestamp DESC LIMIT 10;
 ## 🆘 紧急联系
 
 - **详细文档**: [DEPLOY_TO_SERVER.md](DEPLOY_TO_SERVER.md)
+- **VLESS 支持**: [VLESS_SUPPORT.md](VLESS_SUPPORT.md)
 - **GitHub Issues**: https://github.com/fx120/socks-relay-manager/issues
 - **部署指南**: docs/DEPLOYMENT.md
 - **故障排查**: docs/TROUBLESHOOTING.md

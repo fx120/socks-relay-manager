@@ -19,6 +19,8 @@
 ## ✨ 功能特性
 
 - **多端口SOCKS5代理**: 支持同时运行多个本地代理端口，每个端口独立配置
+- **多协议支持**: 支持 SOCKS5、HTTP、HTTPS 和 VLESS 协议
+- **VLESS 连接导入**: 一键导入 VLESS URL 或 JSON 配置，支持 WebSocket、gRPC、TLS/XTLS
 - **自动健康监控**: 定期检查上游代理的可用性，自动检测故障
 - **智能代理切换**: 当检测到代理失效时，自动从API获取新代理并无缝切换
 - **Web管理界面**: 直观的Web界面，方便管理代理配置和监控状态
@@ -256,9 +258,36 @@ proxy-relay monitor stop <port>
 # 手动切换代理
 proxy-relay switch <port>
 
+# 导入 VLESS 代理
+proxy-relay import-vless "vless://uuid@server:port?..." <port>
+
 # 测试API连接
 proxy-relay test-api <provider_id>
 ```
+
+### VLESS 代理导入
+
+系统支持从 VLESS URL 或 JSON 配置快速导入代理：
+
+```bash
+# 从 VLESS URL 导入
+proxy-relay import-vless \
+  "vless://550e8400-e29b-41d4-a716-446655440000@example.com:443?type=ws&path=/ws&security=tls&sni=example.com" \
+  1080 \
+  --name "My VLESS Proxy" \
+  --monitoring
+
+# 从 JSON 配置导入
+proxy-relay import-vless '{
+  "server": "example.com",
+  "port": 443,
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "network": "ws",
+  "tls": {"enabled": true, "sni": "example.com"}
+}' 1081
+```
+
+详细的 VLESS 配置说明请参考 [VLESS 支持文档](docs/VLESS_SUPPORT.md)。
 
 ### Web界面操作
 

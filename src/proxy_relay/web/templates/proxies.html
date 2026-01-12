@@ -229,6 +229,15 @@
                                         <input 
                                             type="radio" 
                                             x-model="formData.upstream_mode"
+                                            value="link"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        >
+                                        <span class="ml-2 text-sm text-gray-700">链接导入</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input 
+                                            type="radio" 
+                                            x-model="formData.upstream_mode"
                                             value="api"
                                             class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                                         >
@@ -236,6 +245,57 @@
                                     </label>
                                 </div>
                             </div>
+                            
+                            <!-- 链接导入模式 -->
+                            <template x-if="formData.upstream_mode === 'link'">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">VLESS 链接 *</label>
+                                        <div class="flex space-x-2">
+                                            <input 
+                                                type="text" 
+                                                x-model="formData.vless_link"
+                                                placeholder="vless://uuid@server:port?... 或 JSON 配置"
+                                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            >
+                                            <button 
+                                                type="button"
+                                                @click="parseVLESSLink()"
+                                                :disabled="!formData.vless_link || parsing"
+                                                class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <span x-show="!parsing">解析</span>
+                                                <span x-show="parsing">
+                                                    <i class="fas fa-spinner fa-spin"></i>
+                                                </span>
+                                            </button>
+                                        </div>
+                                        <p class="mt-1 text-xs text-gray-500">支持 VLESS URL 或 JSON 配置格式</p>
+                                        <template x-if="parsedUpstream">
+                                            <div class="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                                <div class="flex items-center text-green-700 mb-2">
+                                                    <i class="fas fa-check-circle mr-2"></i>
+                                                    <span class="text-sm font-medium">解析成功</span>
+                                                </div>
+                                                <div class="text-xs text-gray-600 space-y-1">
+                                                    <div><span class="font-medium">服务器:</span> <span x-text="parsedUpstream.server"></span></div>
+                                                    <div><span class="font-medium">端口:</span> <span x-text="parsedUpstream.port"></span></div>
+                                                    <div><span class="font-medium">协议:</span> <span x-text="parsedUpstream.protocol"></span></div>
+                                                    <template x-if="parsedUpstream.protocol === 'vless'">
+                                                        <div>
+                                                            <span class="font-medium">传输:</span> 
+                                                            <span x-text="parsedUpstream.network"></span>
+                                                            <template x-if="parsedUpstream.tls">
+                                                                <span class="ml-2 px-1 py-0.5 bg-blue-100 text-blue-700 rounded">TLS</span>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
                             
                             <!-- API 模式 -->
                             <template x-if="formData.upstream_mode === 'api'">
@@ -309,6 +369,7 @@
                                             <option value="socks5">SOCKS5</option>
                                             <option value="http">HTTP</option>
                                             <option value="https">HTTPS</option>
+                                            <option value="vless">VLESS</option>
                                         </select>
                                     </div>
                                 </div>
@@ -419,14 +480,17 @@ function proxiesData() {
         showDeleteModal: false,
         saving: false,
         deleting: false,
+        parsing: false,
         deleteTarget: null,
+        parsedUpstream: null,
         formData: {
             local_port: '',
             name: '',
             local_username: '',
             local_password: '',
             use_upstream: false,
-            upstream_mode: 'manual', // 'manual' or 'api'
+            upstream_mode: 'manual', // 'manual', 'link', or 'api'
+            vless_link: '',
             api_provider_id: '',
             upstream: {
                 server: '',
@@ -465,6 +529,63 @@ function proxiesData() {
                 }
             } catch (error) {
                 console.error('Failed to load API providers:', error);
+            }
+        },
+        
+        async parseVLESSLink() {
+            if (!this.formData.vless_link) {
+                this.notify('请输入 VLESS 链接', 'error');
+                return;
+            }
+            
+            this.parsing = true;
+            this.parsedUpstream = null;
+            
+            try {
+                const response = await fetch('/api/proxies/parse-vless', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        link: this.formData.vless_link
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.parsedUpstream = data;
+                    
+                    // 自动填充表单
+                    this.formData.upstream = {
+                        server: data.server,
+                        port: data.port,
+                        username: data.username || '',
+                        password: data.password || '',
+                        protocol: data.protocol,
+                        // VLESS 特定字段
+                        uuid: data.uuid,
+                        flow: data.flow,
+                        encryption: data.encryption,
+                        network: data.network,
+                        tls: data.tls,
+                        sni: data.sni,
+                        alpn: data.alpn,
+                        ws_path: data.ws_path,
+                        ws_host: data.ws_host,
+                        grpc_service_name: data.grpc_service_name
+                    };
+                    
+                    this.notify('链接解析成功', 'success');
+                } else {
+                    const error = await response.json();
+                    this.notify(error.detail || '链接解析失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to parse VLESS link:', error);
+                this.notify('链接解析失败', 'error');
+            } finally {
+                this.parsing = false;
             }
         },
         
@@ -520,6 +641,16 @@ function proxiesData() {
                         data.api_provider_id = this.formData.api_provider_id;
                         data.fetch_from_api = true;  // 告诉后端从 API 获取上游代理
                         data.upstream = null;
+                    } else if (this.formData.upstream_mode === 'link') {
+                        // 链接导入模式
+                        if (!this.parsedUpstream) {
+                            this.notify('请先解析 VLESS 链接', 'error');
+                            this.saving = false;
+                            return;
+                        }
+                        data.api_provider_id = null;
+                        data.fetch_from_api = false;
+                        data.upstream = this.formData.upstream;
                     } else {
                         // 手动模式
                         if (!this.formData.upstream.server || !this.formData.upstream.port) {
@@ -606,6 +737,7 @@ function proxiesData() {
         closeModal() {
             this.showAddModal = false;
             this.showEditModal = false;
+            this.parsedUpstream = null;
             this.formData = {
                 local_port: '',
                 name: '',
@@ -613,6 +745,7 @@ function proxiesData() {
                 local_password: '',
                 use_upstream: false,
                 upstream_mode: 'manual',
+                vless_link: '',
                 api_provider_id: '',
                 upstream: {
                     server: '',

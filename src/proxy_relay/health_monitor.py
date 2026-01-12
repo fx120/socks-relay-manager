@@ -184,6 +184,10 @@ class HealthMonitor:
                 - 响应时间（毫秒，失败时为None）
                 - 错误信息（成功时为None）
         """
+        # VLESS 协议不支持直接 HTTP 测试
+        if upstream.protocol == "vless":
+            return True, None, "VLESS 协议不支持直接测试，请通过实际使用验证连接"
+        
         config = self.config_manager._current_config
         if not config:
             return False, None, "Configuration not loaded"

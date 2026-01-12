@@ -1,0 +1,199 @@
+================================================================================
+  代理中转系统 - VLESS 功能更新包
+================================================================================
+
+版本: v1.1.0
+日期: 2026-01-12
+文件: proxy-relay-vless-update.tar.gz
+大小: 558 KB
+MD5:  e34134d91d695bc5ef587758303537a9
+
+================================================================================
+  新增功能
+================================================================================
+
+✓ VLESS 协议完整支持
+✓ Web 界面链接导入功能
+✓ 命令行 import-vless 工具
+✓ 支持 WebSocket、gRPC、TLS/XTLS
+✓ 自动解析和配置填充
+
+================================================================================
+  快速安装步骤
+================================================================================
+
+1. 上传文件到服务器
+   ----------------
+   scp proxy-relay-vless-update.tar.gz root@your-server:/tmp/
+   scp scripts/update_vless.sh root@your-server:/tmp/
+
+2. SSH 登录服务器
+   ----------------
+   ssh root@your-server
+
+3. 复制文件到应用目录
+   ----------------
+   cd /opt/proxy-relay/app
+   cp /tmp/proxy-relay-vless-update.tar.gz .
+   cp /tmp/update_vless.sh .
+
+4. 运行更新脚本
+   ----------------
+   sudo bash update_vless.sh
+
+   脚本会自动：
+   - 备份配置和数据库
+   - 停止服务
+   - 更新代码和依赖
+   - 重新生成配置
+   - 启动服务
+
+5. 验证更新
+   ----------------
+   # 检查服务状态
+   sudo systemctl status proxy-relay
+   sudo systemctl status sing-box
+
+   # 访问 Web 界面
+   http://your-server:8080/proxies
+
+   # 测试命令行工具
+   proxy-relay import-vless --help
+
+================================================================================
+  使用新功能
+================================================================================
+
+方法 1: Web 界面导入（推荐）
+---------------------------
+1. 访问 http://your-server:8080/proxies
+2. 点击"添加代理"
+3. 勾选"使用出口代理"
+4. 选择"链接导入"
+5. 粘贴 VLESS 链接
+6. 点击"解析"
+7. 点击"保存"
+
+方法 2: 命令行导入
+---------------------------
+proxy-relay import-vless "vless://uuid@server:port?..." 1080
+
+示例:
+proxy-relay import-vless \
+  "vless://550e8400-e29b-41d4-a716-446655440000@example.com:443?type=ws&security=tls&sni=example.com" \
+  1080 \
+  --name "My VLESS Proxy" \
+  --monitoring
+
+================================================================================
+  文档位置
+================================================================================
+
+安装后，文档位于 /opt/proxy-relay/app/docs/
+
+- VLESS_SUPPORT.md      - VLESS 完整使用文档
+- WEB_VLESS_IMPORT.md   - Web 界面导入指南
+- UPDATE_VLESS.md       - 详细更新说明
+- VLESS_CHANGELOG.md    - 更新日志
+- TROUBLESHOOTING.md    - 故障排除
+
+================================================================================
+  故障排除
+================================================================================
+
+如果更新后出现问题：
+
+1. 查看日志
+   sudo journalctl -u proxy-relay -n 100
+   sudo journalctl -u sing-box -n 100
+
+2. 运行诊断
+   sudo bash /opt/proxy-relay/app/scripts/diagnose.sh
+
+3. 检查配置
+   sudo cat /etc/sing-box/config.json
+   sudo sing-box check -c /etc/sing-box/config.json
+
+4. 重启服务
+   sudo systemctl restart sing-box
+   sudo systemctl restart proxy-relay
+
+5. 查看详细文档
+   cat /opt/proxy-relay/app/docs/UPDATE_VLESS.md
+
+================================================================================
+  回滚步骤
+================================================================================
+
+如需回滚到更新前的版本：
+
+1. 停止服务
+   sudo systemctl stop proxy-relay sing-box
+
+2. 恢复代码
+   cd /opt/proxy-relay/app
+   rm -rf src
+   mv src.old.* src
+
+3. 恢复配置
+   sudo cp /opt/proxy-relay/backup-*/config.yaml /etc/proxy-relay/
+   sudo cp /opt/proxy-relay/backup-*/data.db /var/lib/proxy-relay/
+
+4. 启动服务
+   sudo systemctl start sing-box proxy-relay
+
+备份位置会在更新时显示，格式为：
+/opt/proxy-relay/backup-YYYYMMDD-HHMMSS/
+
+================================================================================
+  技术支持
+================================================================================
+
+GitHub: https://github.com/fx120/socks-relay-manager
+文档: /opt/proxy-relay/app/docs/
+诊断: sudo bash /opt/proxy-relay/app/scripts/diagnose.sh
+
+================================================================================
+  更新内容摘要
+================================================================================
+
+新增文件:
+- src/proxy_relay/vless_parser.py
+- tests/test_vless_parser.py
+- tests/test_web_api_vless.py
+- docs/VLESS_SUPPORT.md
+- docs/WEB_VLESS_IMPORT.md
+- docs/VLESS_CHANGELOG.md
+- docs/UPDATE_VLESS.md
+- scripts/update_vless.sh
+
+修改文件:
+- src/proxy_relay/models.py (扩展 VLESS 支持)
+- src/proxy_relay/api_client.py (VLESS 解析)
+- src/proxy_relay/proxy_manager.py (VLESS 配置生成)
+- src/proxy_relay/web_api.py (添加解析 API)
+- src/proxy_relay/cli.py (import-vless 命令)
+- src/proxy_relay/web/templates/proxies.html (链接导入界面)
+- config.yaml.example (VLESS 示例)
+- README.md (功能说明)
+
+测试覆盖:
+- 20 个 VLESS 解析器测试
+- 8 个 Web API VLESS 测试
+- 所有测试通过
+
+================================================================================
+  安全提示
+================================================================================
+
+1. 更新前务必备份配置和数据库
+2. 在测试环境先验证更新
+3. 保护好 VLESS UUID（相当于密码）
+4. 使用 HTTPS 访问 Web 界面
+5. 定期更换代理配置
+
+================================================================================
+
+祝使用愉快！如有问题请查看文档或运行诊断脚本。
+
+================================================================================

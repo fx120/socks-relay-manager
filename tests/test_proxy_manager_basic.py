@@ -157,7 +157,7 @@ def test_generate_singbox_config_outbound_structure(proxy_manager):
     
     # 检查第一个outbound（无认证）
     outbound1 = config["outbounds"][0]
-    assert outbound1["type"] == "socks5"
+    assert outbound1["type"] == "socks"  # sing-box 使用 "socks" 而不是 "socks5"
     assert outbound1["tag"] == "upstream-1080"
     assert outbound1["server"] == "proxy1.example.com"
     assert outbound1["server_port"] == 10000
@@ -166,7 +166,7 @@ def test_generate_singbox_config_outbound_structure(proxy_manager):
     
     # 检查第二个outbound（有认证）
     outbound2 = config["outbounds"][1]
-    assert outbound2["type"] == "socks5"
+    assert outbound2["type"] == "socks"  # sing-box 使用 "socks" 而不是 "socks5"
     assert outbound2["tag"] == "upstream-1081"
     assert outbound2["server"] == "proxy2.example.com"
     assert outbound2["server_port"] == 10001

@@ -43,14 +43,33 @@ class UpstreamProxyModel(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     protocol: str = "socks5"
+    # VLESS 特定字段
+    uuid: Optional[str] = None
+    flow: Optional[str] = None
+    encryption: Optional[str] = "none"
+    network: Optional[str] = "tcp"
+    tls: Optional[bool] = False
+    sni: Optional[str] = None
+    alpn: Optional[List[str]] = None
+    # Reality 配置
+    reality: Optional[bool] = False
+    reality_public_key: Optional[str] = None
+    reality_short_id: Optional[str] = None
+    reality_server_name: Optional[str] = None
+    reality_fingerprint: Optional[str] = None
+    # WebSocket/gRPC 配置
+    ws_path: Optional[str] = None
+    ws_host: Optional[str] = None
+    grpc_service_name: Optional[str] = None
 
 
 class ProxyConfigModel(BaseModel):
     """代理配置模型"""
     local_port: int = Field(ge=1024, le=65535)
     name: str
+    upstream_id: Optional[str] = None  # 引用出口代理池 ID（v1.2.0 新增）
     api_provider_id: Optional[str] = None  # 可选，仅在使用 API 获取上游代理时需要
-    upstream: Optional[UpstreamProxyModel] = None  # 可选，如果为 None 则使用 direct 模式
+    upstream: Optional[UpstreamProxyModel] = None  # 可选，如果为 None 则使用 direct 模式（向后兼容）
     monitoring_enabled: bool = False
     # SOCKS5 本地认证配置（可选）
     local_username: Optional[str] = None
@@ -86,9 +105,15 @@ class APIProviderConfigModel(BaseModel):
     response_format: ResponseFormatModel
 
 
+class VLESSLinkModel(BaseModel):
+    """VLESS 链接模型"""
+    link: str = Field(..., description="VLESS URL 或 JSON 配置")
+
+
 class ProxyUpdateModel(BaseModel):
     """代理更新模型"""
     name: Optional[str] = None
+    upstream_id: Optional[str] = None  # 引用出口代理池 ID（v1.2.0 新增）
     api_provider_id: Optional[str] = None
     upstream: Optional[UpstreamProxyModel] = None
     monitoring_enabled: Optional[bool] = None
@@ -116,6 +141,35 @@ class PasswordChangeModel(BaseModel):
     """密码修改模型"""
     old_password: str
     new_password: str = Field(min_length=6)
+
+
+class UpstreamProxyPoolModel(BaseModel):
+    """出口代理池模型"""
+    id: str
+    name: str
+    proxy: UpstreamProxyModel
+    enabled: bool = True
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class UpstreamProxyPoolCreateModel(BaseModel):
+    """创建出口代理池模型"""
+    id: str
+    name: str
+    proxy: UpstreamProxyModel
+    enabled: bool = True
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class UpstreamProxyPoolUpdateModel(BaseModel):
+    """更新出口代理池模型"""
+    name: Optional[str] = None
+    proxy: Optional[UpstreamProxyModel] = None
+    enabled: Optional[bool] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 # ==================== FastAPI 应用 ====================
@@ -222,6 +276,7 @@ class WebAPI:
         self.app.get("/api/proxies/{port}", dependencies=[Depends(self.auth_dependency)])(self.get_proxy)
         self.app.put("/api/proxies/{port}", dependencies=[Depends(self.auth_dependency)])(self.update_proxy)
         self.app.delete("/api/proxies/{port}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(self.auth_dependency)])(self.delete_proxy)
+        self.app.post("/api/proxies/parse-vless", dependencies=[Depends(self.auth_dependency)])(self.parse_vless_link)
         
         # 监控控制路由
         self.app.post("/api/proxies/{port}/monitoring/start", dependencies=[Depends(self.auth_dependency)])(self.start_monitoring)
@@ -254,6 +309,15 @@ class WebAPI:
         self.app.put("/api/api-providers/{provider_id}", dependencies=[Depends(self.auth_dependency)])(self.update_api_provider)
         self.app.delete("/api/api-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(self.auth_dependency)])(self.delete_api_provider)
         self.app.post("/api/api-providers/{provider_id}/test", dependencies=[Depends(self.auth_dependency)])(self.test_api_provider)
+        
+        # 出口代理池管理路由 (v1.2.0)
+        self.app.get("/upstream-proxies", response_class=HTMLResponse, dependencies=[Depends(self.auth_dependency)])(self.page_upstream_proxies)
+        self.app.get("/api/upstream-proxies", dependencies=[Depends(self.auth_dependency)])(self.get_upstream_proxies)
+        self.app.post("/api/upstream-proxies", status_code=status.HTTP_201_CREATED, dependencies=[Depends(self.auth_dependency)])(self.create_upstream_proxy)
+        self.app.get("/api/upstream-proxies/{upstream_id}", dependencies=[Depends(self.auth_dependency)])(self.get_upstream_proxy)
+        self.app.put("/api/upstream-proxies/{upstream_id}", dependencies=[Depends(self.auth_dependency)])(self.update_upstream_proxy)
+        self.app.delete("/api/upstream-proxies/{upstream_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(self.auth_dependency)])(self.delete_upstream_proxy)
+        self.app.post("/api/upstream-proxies/{upstream_id}/test", dependencies=[Depends(self.auth_dependency)])(self.test_upstream_proxy)
         
         # 实时状态更新路由 (SSE)
         self.app.get("/api/events/status", dependencies=[Depends(self.auth_dependency)])(self.stream_status_updates)
@@ -323,6 +387,7 @@ class WebAPI:
                 proxy_dict = {
                     "local_port": proxy.local_port,
                     "name": proxy.name,
+                    "upstream_id": proxy.upstream_id,  # v1.2.0 新增
                     "api_provider_id": proxy.api_provider_id,
                     "upstream": {
                         "server": proxy.upstream.server,
@@ -408,16 +473,40 @@ class WebAPI:
                         detail=f"API provider '{proxy.api_provider_id}' not found"
                     )
             
+            # 如果指定了 upstream_id，检查其是否存在
+            if proxy.upstream_id:
+                upstream_exists = any(u.id == proxy.upstream_id for u in config.upstream_proxies)
+                if not upstream_exists:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Upstream proxy '{proxy.upstream_id}' not found in upstream proxy pool"
+                    )
+            
             # 创建上游代理配置
             upstream = None
-            if proxy.upstream:
+            if proxy.upstream_id:
+                # 使用出口代理池中的代理（v1.2.0 新方式）
+                # upstream 字段留空，由 proxy_manager 根据 upstream_id 解析
+                pass
+            elif proxy.upstream:
                 # 手动输入的上游代理
                 upstream = UpstreamProxy(
                     server=proxy.upstream.server,
                     port=proxy.upstream.port,
                     username=proxy.upstream.username,
                     password=proxy.upstream.password,
-                    protocol=proxy.upstream.protocol
+                    protocol=proxy.upstream.protocol,
+                    # VLESS 特定字段
+                    uuid=proxy.upstream.uuid,
+                    flow=proxy.upstream.flow,
+                    encryption=proxy.upstream.encryption or "none",
+                    network=proxy.upstream.network or "tcp",
+                    tls=proxy.upstream.tls or False,
+                    sni=proxy.upstream.sni,
+                    alpn=proxy.upstream.alpn,
+                    ws_path=proxy.upstream.ws_path,
+                    ws_host=proxy.upstream.ws_host,
+                    grpc_service_name=proxy.upstream.grpc_service_name
                 )
             elif proxy.api_provider_id:
                 # 通过 API 获取上游代理
@@ -432,8 +521,8 @@ class WebAPI:
                         detail=f"Failed to get proxy from API provider: {str(api_error)}"
                     )
             
-            # 验证：如果开启监控但没有上游代理，报错
-            if proxy.monitoring_enabled and not upstream:
+            # 验证：如果开启监控但没有上游代理和上游ID，报错
+            if proxy.monitoring_enabled and not upstream and not proxy.upstream_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot enable monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy or disable monitoring."
@@ -443,6 +532,7 @@ class WebAPI:
             new_proxy = ProxyConfig(
                 local_port=proxy.local_port,
                 name=proxy.name,
+                upstream_id=proxy.upstream_id,  # v1.2.0 新增
                 api_provider_id=proxy.api_provider_id,
                 upstream=upstream,
                 monitoring_enabled=proxy.monitoring_enabled,
@@ -476,6 +566,7 @@ class WebAPI:
             result = {
                 "local_port": new_proxy.local_port,
                 "name": new_proxy.name,
+                "upstream_id": new_proxy.upstream_id,  # v1.2.0 新增
                 "api_provider_id": new_proxy.api_provider_id,
                 "upstream": None,
                 "monitoring_enabled": new_proxy.monitoring_enabled,
@@ -528,6 +619,7 @@ class WebAPI:
             proxy_dict = {
                 "local_port": proxy_config.local_port,
                 "name": proxy_config.name,
+                "upstream_id": proxy_config.upstream_id,  # v1.2.0 新增
                 "api_provider_id": proxy_config.api_provider_id,
                 "upstream": {
                     "server": proxy_config.upstream.server,
@@ -595,6 +687,18 @@ class WebAPI:
             if proxy_update.name is not None:
                 proxy_config.name = proxy_update.name
             
+            if proxy_update.upstream_id is not None:
+                # 检查出口代理是否存在
+                upstream_exists = any(u.id == proxy_update.upstream_id for u in config.upstream_proxies)
+                if not upstream_exists:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Upstream proxy '{proxy_update.upstream_id}' not found in upstream proxy pool"
+                    )
+                proxy_config.upstream_id = proxy_update.upstream_id
+                # 清空直接配置的 upstream，使用 upstream_id
+                proxy_config.upstream = None
+            
             if proxy_update.api_provider_id is not None:
                 # 检查API提供商是否存在
                 provider_exists = any(p.id == proxy_update.api_provider_id for p in config.api_providers)
@@ -607,14 +711,27 @@ class WebAPI:
             
             # 处理上游代理配置
             if proxy_update.upstream is not None:
-                # 手动输入的上游代理
+                # 手动输入的上游代理（向后兼容）
                 proxy_config.upstream = UpstreamProxy(
                     server=proxy_update.upstream.server,
                     port=proxy_update.upstream.port,
                     username=proxy_update.upstream.username,
                     password=proxy_update.upstream.password,
-                    protocol=proxy_update.upstream.protocol
+                    protocol=proxy_update.upstream.protocol,
+                    # VLESS 特定字段
+                    uuid=proxy_update.upstream.uuid,
+                    flow=proxy_update.upstream.flow,
+                    encryption=proxy_update.upstream.encryption or "none",
+                    network=proxy_update.upstream.network or "tcp",
+                    tls=proxy_update.upstream.tls or False,
+                    sni=proxy_update.upstream.sni,
+                    alpn=proxy_update.upstream.alpn,
+                    ws_path=proxy_update.upstream.ws_path,
+                    ws_host=proxy_update.upstream.ws_host,
+                    grpc_service_name=proxy_update.upstream.grpc_service_name
                 )
+                # 清空 upstream_id
+                proxy_config.upstream_id = None
             elif proxy_update.fetch_from_api and proxy_config.api_provider_id:
                 # 从 API 获取上游代理
                 try:
@@ -631,8 +748,8 @@ class WebAPI:
             if proxy_update.monitoring_enabled is not None:
                 proxy_config.monitoring_enabled = proxy_update.monitoring_enabled
             
-            # 验证：如果开启监控但没有上游代理，报错
-            if proxy_config.monitoring_enabled and not proxy_config.upstream:
+            # 验证：如果开启监控但没有上游代理和上游ID，报错
+            if proxy_config.monitoring_enabled and not proxy_config.upstream and not proxy_config.upstream_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot enable monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy or disable monitoring."
@@ -649,6 +766,7 @@ class WebAPI:
             return {
                 "local_port": proxy_config.local_port,
                 "name": proxy_config.name,
+                "upstream_id": proxy_config.upstream_id,  # v1.2.0 新增
                 "api_provider_id": proxy_config.api_provider_id,
                 "upstream": {
                     "server": proxy_config.upstream.server,
@@ -725,6 +843,72 @@ class WebAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to delete proxy: {str(e)}"
+            )
+    
+    async def parse_vless_link(self, data: VLESSLinkModel):
+        """
+        解析 VLESS 链接
+        
+        Args:
+            data: VLESS 链接数据
+            
+        Returns:
+            dict: 解析后的代理配置
+        """
+        try:
+            from .vless_parser import VLESSParser, VLESSParseError
+            
+            logger.info("Parsing VLESS link")
+            
+            # 解析 VLESS 链接
+            try:
+                upstream = VLESSParser.parse(data.link)
+                logger.info(f"Successfully parsed VLESS link: {upstream.server}:{upstream.port}")
+            except VLESSParseError as e:
+                logger.error(f"Failed to parse VLESS link: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid VLESS link: {str(e)}"
+                )
+            
+            # 构建返回数据
+            result = {
+                "server": upstream.server,
+                "port": upstream.port,
+                "protocol": upstream.protocol,
+                "username": upstream.username,
+                "password": upstream.password
+            }
+            
+            # 添加 VLESS 特定字段
+            if upstream.protocol == "vless":
+                result.update({
+                    "uuid": upstream.uuid,
+                    "flow": upstream.flow,
+                    "encryption": upstream.encryption,
+                    "network": upstream.network,
+                    "tls": upstream.tls,
+                    "sni": upstream.sni,
+                    "alpn": upstream.alpn,
+                    "reality": upstream.reality,
+                    "reality_public_key": upstream.reality_public_key,
+                    "reality_short_id": upstream.reality_short_id,
+                    "reality_server_name": upstream.reality_server_name,
+                    "reality_fingerprint": upstream.reality_fingerprint,
+                    "ws_path": upstream.ws_path,
+                    "ws_host": upstream.ws_host,
+                    "grpc_service_name": upstream.grpc_service_name
+                })
+            
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to parse VLESS link: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse VLESS link: {str(e)}"
             )
     
     # ==================== 监控控制端点 ====================
@@ -2275,6 +2459,463 @@ class WebAPI:
         
         return changes
 
+    async def page_upstream_proxies(self, request: Request):
+        """出口代理池管理页面"""
+        return self.templates.TemplateResponse("upstream_proxies.html", {"request": request})
+    
+    async def get_upstream_proxies(self):
+        """
+        获取所有出口代理池配置
+        
+        Returns:
+            dict: 出口代理池列表
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 构建响应
+            upstream_proxies = []
+            for upstream in config.upstream_proxies:
+                # 统计使用此出口代理的本地代理数量
+                usage_count = sum(1 for p in config.proxies if p.upstream_id == upstream.id)
+                
+                upstream_dict = {
+                    "id": upstream.id,
+                    "name": upstream.name,
+                    "enabled": upstream.enabled,
+                    "description": upstream.description,
+                    "tags": upstream.tags,
+                    "proxy": {
+                        "server": upstream.proxy.server,
+                        "port": upstream.proxy.port,
+                        "protocol": upstream.proxy.protocol,
+                        "username": upstream.proxy.username,
+                        "password": "***" if upstream.proxy.password else None
+                    },
+                    "usage_count": usage_count
+                }
+                
+                # 添加 VLESS 特定字段
+                if upstream.proxy.protocol == "vless":
+                    upstream_dict["proxy"].update({
+                        "uuid": upstream.proxy.uuid,
+                        "flow": upstream.proxy.flow,
+                        "encryption": upstream.proxy.encryption,
+                        "network": upstream.proxy.network,
+                        "tls": upstream.proxy.tls,
+                        "sni": upstream.proxy.sni,
+                        "alpn": upstream.proxy.alpn,
+                        "reality": upstream.proxy.reality,
+                        "reality_public_key": upstream.proxy.reality_public_key,
+                        "reality_short_id": upstream.proxy.reality_short_id,
+                        "reality_server_name": upstream.proxy.reality_server_name,
+                        "reality_fingerprint": upstream.proxy.reality_fingerprint,
+                        "ws_path": upstream.proxy.ws_path,
+                        "ws_host": upstream.proxy.ws_host,
+                        "grpc_service_name": upstream.proxy.grpc_service_name
+                    })
+                
+                upstream_proxies.append(upstream_dict)
+            
+            logger.info(f"Retrieved {len(upstream_proxies)} upstream proxy configurations")
+            return {"upstream_proxies": upstream_proxies}
+            
+        except Exception as e:
+            logger.error(f"Failed to get upstream proxies: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get upstream proxies: {str(e)}"
+            )
+    
+    async def create_upstream_proxy(self, upstream: UpstreamProxyPoolCreateModel):
+        """
+        添加新的出口代理
+        
+        Args:
+            upstream: 出口代理配置
+            
+        Returns:
+            dict: 创建的出口代理配置
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 检查 ID 是否已存在
+            for existing in config.upstream_proxies:
+                if existing.id == upstream.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Upstream proxy with id '{upstream.id}' already exists"
+                    )
+            
+            # 创建上游代理配置
+            from .models import UpstreamProxyPool
+            proxy = UpstreamProxy(
+                server=upstream.proxy.server,
+                port=upstream.proxy.port,
+                username=upstream.proxy.username,
+                password=upstream.proxy.password,
+                protocol=upstream.proxy.protocol,
+                # VLESS 特定字段
+                uuid=upstream.proxy.uuid,
+                flow=upstream.proxy.flow,
+                encryption=upstream.proxy.encryption or "none",
+                network=upstream.proxy.network or "tcp",
+                tls=upstream.proxy.tls or False,
+                sni=upstream.proxy.sni,
+                alpn=upstream.proxy.alpn,
+                # Reality 配置
+                reality=upstream.proxy.reality or False,
+                reality_public_key=upstream.proxy.reality_public_key,
+                reality_short_id=upstream.proxy.reality_short_id,
+                reality_server_name=upstream.proxy.reality_server_name,
+                reality_fingerprint=upstream.proxy.reality_fingerprint,
+                # WebSocket/gRPC 配置
+                ws_path=upstream.proxy.ws_path,
+                ws_host=upstream.proxy.ws_host,
+                grpc_service_name=upstream.proxy.grpc_service_name
+            )
+            
+            new_upstream = UpstreamProxyPool(
+                id=upstream.id,
+                name=upstream.name,
+                proxy=proxy,
+                enabled=upstream.enabled,
+                description=upstream.description,
+                tags=upstream.tags
+            )
+            
+            # 添加到配置
+            config.upstream_proxies.append(new_upstream)
+            
+            # 保存配置
+            self.config_manager.save_config(config)
+            
+            logger.info(f"Created upstream proxy: {upstream.name} (id: {upstream.id})")
+            
+            return {
+                "id": new_upstream.id,
+                "name": new_upstream.name,
+                "enabled": new_upstream.enabled,
+                "description": new_upstream.description,
+                "tags": new_upstream.tags,
+                "proxy": {
+                    "server": new_upstream.proxy.server,
+                    "port": new_upstream.proxy.port,
+                    "protocol": new_upstream.proxy.protocol
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to create upstream proxy: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create upstream proxy: {str(e)}"
+            )
+    
+    async def get_upstream_proxy(self, upstream_id: str):
+        """
+        获取指定出口代理
+        
+        Args:
+            upstream_id: 出口代理 ID
+            
+        Returns:
+            dict: 出口代理配置
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 查找出口代理
+            upstream = None
+            for u in config.upstream_proxies:
+                if u.id == upstream_id:
+                    upstream = u
+                    break
+            
+            if not upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Upstream proxy with id '{upstream_id}' not found"
+                )
+            
+            # 统计使用此出口代理的本地代理
+            usage_count = sum(1 for p in config.proxies if p.upstream_id == upstream_id)
+            used_by_ports = [p.local_port for p in config.proxies if p.upstream_id == upstream_id]
+            
+            result = {
+                "id": upstream.id,
+                "name": upstream.name,
+                "enabled": upstream.enabled,
+                "description": upstream.description,
+                "tags": upstream.tags,
+                "proxy": {
+                    "server": upstream.proxy.server,
+                    "port": upstream.proxy.port,
+                    "protocol": upstream.proxy.protocol,
+                    "username": upstream.proxy.username,
+                    "password": upstream.proxy.password
+                },
+                "usage_count": usage_count,
+                "used_by_ports": used_by_ports
+            }
+            
+            # 添加 VLESS 特定字段
+            if upstream.proxy.protocol == "vless":
+                result["proxy"].update({
+                    "uuid": upstream.proxy.uuid,
+                    "flow": upstream.proxy.flow,
+                    "encryption": upstream.proxy.encryption,
+                    "network": upstream.proxy.network,
+                    "tls": upstream.proxy.tls,
+                    "sni": upstream.proxy.sni,
+                    "alpn": upstream.proxy.alpn,
+                    "reality": upstream.proxy.reality,
+                    "reality_public_key": upstream.proxy.reality_public_key,
+                    "reality_short_id": upstream.proxy.reality_short_id,
+                    "reality_server_name": upstream.proxy.reality_server_name,
+                    "reality_fingerprint": upstream.proxy.reality_fingerprint,
+                    "ws_path": upstream.proxy.ws_path,
+                    "ws_host": upstream.proxy.ws_host,
+                    "grpc_service_name": upstream.proxy.grpc_service_name
+                })
+            
+            logger.info(f"Retrieved upstream proxy: {upstream_id}")
+            return result
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get upstream proxy: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get upstream proxy: {str(e)}"
+            )
+    
+    async def update_upstream_proxy(self, upstream_id: str, upstream_update: UpstreamProxyPoolUpdateModel):
+        """
+        更新出口代理配置
+        
+        Args:
+            upstream_id: 出口代理 ID
+            upstream_update: 更新的配置
+            
+        Returns:
+            dict: 更新后的出口代理配置
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 查找出口代理
+            upstream = None
+            for u in config.upstream_proxies:
+                if u.id == upstream_id:
+                    upstream = u
+                    break
+            
+            if not upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Upstream proxy with id '{upstream_id}' not found"
+                )
+            
+            # 更新字段
+            if upstream_update.name is not None:
+                upstream.name = upstream_update.name
+            
+            if upstream_update.enabled is not None:
+                upstream.enabled = upstream_update.enabled
+            
+            if upstream_update.description is not None:
+                upstream.description = upstream_update.description
+            
+            if upstream_update.tags is not None:
+                upstream.tags = upstream_update.tags
+            
+            if upstream_update.proxy is not None:
+                # 更新代理配置
+                upstream.proxy = UpstreamProxy(
+                    server=upstream_update.proxy.server,
+                    port=upstream_update.proxy.port,
+                    username=upstream_update.proxy.username,
+                    password=upstream_update.proxy.password,
+                    protocol=upstream_update.proxy.protocol,
+                    # VLESS 特定字段
+                    uuid=upstream_update.proxy.uuid,
+                    flow=upstream_update.proxy.flow,
+                    encryption=upstream_update.proxy.encryption or "none",
+                    network=upstream_update.proxy.network or "tcp",
+                    tls=upstream_update.proxy.tls or False,
+                    sni=upstream_update.proxy.sni,
+                    alpn=upstream_update.proxy.alpn,
+                    # Reality 配置
+                    reality=upstream_update.proxy.reality or False,
+                    reality_public_key=upstream_update.proxy.reality_public_key,
+                    reality_short_id=upstream_update.proxy.reality_short_id,
+                    reality_server_name=upstream_update.proxy.reality_server_name,
+                    reality_fingerprint=upstream_update.proxy.reality_fingerprint,
+                    # WebSocket/gRPC 配置
+                    ws_path=upstream_update.proxy.ws_path,
+                    ws_host=upstream_update.proxy.ws_host,
+                    grpc_service_name=upstream_update.proxy.grpc_service_name
+                )
+            
+            # 保存配置
+            self.config_manager.save_config(config)
+            
+            # 如果有本地代理使用此出口代理，需要重新生成 sing-box 配置
+            usage_count = sum(1 for p in config.proxies if p.upstream_id == upstream_id)
+            if usage_count > 0:
+                try:
+                    self.proxy_manager.apply_singbox_config()
+                    logger.info(f"Applied sing-box configuration after updating upstream proxy {upstream_id}")
+                except Exception as apply_error:
+                    logger.error(f"Failed to apply sing-box config: {apply_error}")
+                    # 不抛出异常，因为配置已经保存
+            
+            logger.info(f"Updated upstream proxy: {upstream_id}")
+            
+            return {
+                "id": upstream.id,
+                "name": upstream.name,
+                "enabled": upstream.enabled,
+                "description": upstream.description,
+                "tags": upstream.tags,
+                "proxy": {
+                    "server": upstream.proxy.server,
+                    "port": upstream.proxy.port,
+                    "protocol": upstream.proxy.protocol
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update upstream proxy: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update upstream proxy: {str(e)}"
+            )
+    
+    async def delete_upstream_proxy(self, upstream_id: str):
+        """
+        删除出口代理
+        
+        Args:
+            upstream_id: 出口代理 ID
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 检查是否有本地代理正在使用此出口代理
+            usage_count = sum(1 for p in config.proxies if p.upstream_id == upstream_id)
+            if usage_count > 0:
+                used_by = [f"{p.name} (port {p.local_port})" for p in config.proxies if p.upstream_id == upstream_id]
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot delete upstream proxy '{upstream_id}' because it is being used by {usage_count} local proxy(ies): {', '.join(used_by)}"
+                )
+            
+            # 查找并删除出口代理
+            upstream_index = None
+            for i, u in enumerate(config.upstream_proxies):
+                if u.id == upstream_id:
+                    upstream_index = i
+                    break
+            
+            if upstream_index is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Upstream proxy with id '{upstream_id}' not found"
+                )
+            
+            # 删除出口代理
+            deleted_upstream = config.upstream_proxies.pop(upstream_index)
+            
+            # 保存配置
+            self.config_manager.save_config(config)
+            
+            logger.info(f"Deleted upstream proxy: {deleted_upstream.name} (id: {upstream_id})")
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete upstream proxy: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete upstream proxy: {str(e)}"
+            )
+    
+    async def test_upstream_proxy(self, upstream_id: str):
+        """
+        测试出口代理连接
+        
+        Args:
+            upstream_id: 出口代理 ID
+            
+        Returns:
+            dict: 测试结果
+        """
+        try:
+            config = self.config_manager._current_config
+            if not config:
+                config = self.config_manager.load_config()
+            
+            # 查找出口代理
+            upstream = None
+            for u in config.upstream_proxies:
+                if u.id == upstream_id:
+                    upstream = u
+                    break
+            
+            if not upstream:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Upstream proxy with id '{upstream_id}' not found"
+                )
+            
+            # 测试代理健康状态
+            is_healthy, response_time_ms, error_message = self.health_monitor.check_proxy_health(
+                upstream.proxy
+            )
+            
+            logger.info(f"Tested upstream proxy {upstream_id}: healthy={is_healthy}")
+            
+            return {
+                "id": upstream_id,
+                "name": upstream.name,
+                "healthy": is_healthy,
+                "response_time_ms": response_time_ms,
+                "error_message": error_message,
+                "proxy": {
+                    "server": upstream.proxy.server,
+                    "port": upstream.proxy.port,
+                    "protocol": upstream.proxy.protocol
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to test upstream proxy: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to test upstream proxy: {str(e)}"
+            )
+
+
 
 def create_app(
     config_manager: ConfigManager,
@@ -2331,7 +2972,8 @@ try:
     logger.info(f"默认应用实例已创建，配置文件: {config_path}")
     
 except Exception as e:
-    logger.error(f"创建默认应用实例失败: {e}")
+    error_message = str(e)
+    logger.error(f"创建默认应用实例失败: {error_message}")
     # 创建一个最小的应用实例，避免导入错误
     app = FastAPI(title="Proxy Relay System (Error)", description="应用初始化失败")
     
@@ -2339,6 +2981,6 @@ except Exception as e:
     async def root():
         return {
             "error": "应用初始化失败",
-            "message": str(e),
+            "message": error_message,
             "hint": "请检查配置文件是否存在: /etc/proxy-relay/config.yaml"
         }

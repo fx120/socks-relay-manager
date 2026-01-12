@@ -336,10 +336,44 @@ class ConfigManager:
             )
             api_providers.append(provider)
         
+        # 解析出口代理池配置
+        upstream_proxies = []
+        for upstream_data in data.get('upstream_proxies', []):
+            proxy_data = upstream_data['proxy']
+            proxy = UpstreamProxy(
+                server=proxy_data['server'],
+                port=proxy_data['port'],
+                username=proxy_data.get('username'),
+                password=proxy_data.get('password'),
+                protocol=proxy_data.get('protocol', 'socks5'),
+                # VLESS 特定字段
+                uuid=proxy_data.get('uuid'),
+                flow=proxy_data.get('flow'),
+                encryption=proxy_data.get('encryption', 'none'),
+                network=proxy_data.get('network', 'tcp'),
+                tls=proxy_data.get('tls', False),
+                sni=proxy_data.get('sni'),
+                alpn=proxy_data.get('alpn'),
+                ws_path=proxy_data.get('ws_path'),
+                ws_host=proxy_data.get('ws_host'),
+                grpc_service_name=proxy_data.get('grpc_service_name')
+            )
+            
+            from .models import UpstreamProxyPool
+            upstream_pool = UpstreamProxyPool(
+                id=upstream_data['id'],
+                name=upstream_data['name'],
+                proxy=proxy,
+                enabled=upstream_data.get('enabled', True),
+                description=upstream_data.get('description'),
+                tags=upstream_data.get('tags')
+            )
+            upstream_proxies.append(upstream_pool)
+        
         # 解析代理配置
         proxies = []
         for proxy_data in data.get('proxies', []):
-            # 解析上游代理（可选）
+            # 解析上游代理（可选，向后兼容）
             upstream = None
             if proxy_data.get('upstream'):
                 upstream_data = proxy_data['upstream']
@@ -348,12 +382,24 @@ class ConfigManager:
                     port=upstream_data['port'],
                     username=upstream_data.get('username'),
                     password=upstream_data.get('password'),
-                    protocol=upstream_data.get('protocol', 'socks5')
+                    protocol=upstream_data.get('protocol', 'socks5'),
+                    # VLESS 特定字段
+                    uuid=upstream_data.get('uuid'),
+                    flow=upstream_data.get('flow'),
+                    encryption=upstream_data.get('encryption', 'none'),
+                    network=upstream_data.get('network', 'tcp'),
+                    tls=upstream_data.get('tls', False),
+                    sni=upstream_data.get('sni'),
+                    alpn=upstream_data.get('alpn'),
+                    ws_path=upstream_data.get('ws_path'),
+                    ws_host=upstream_data.get('ws_host'),
+                    grpc_service_name=upstream_data.get('grpc_service_name')
                 )
             
             proxy = ProxyConfig(
                 local_port=proxy_data['local_port'],
                 name=proxy_data['name'],
+                upstream_id=proxy_data.get('upstream_id'),  # 新增：引用出口代理池
                 api_provider_id=proxy_data.get('api_provider_id'),
                 upstream=upstream,
                 monitoring_enabled=proxy_data.get('monitoring_enabled', False),
@@ -366,6 +412,7 @@ class ConfigManager:
             system=system,
             monitoring=monitoring,
             api_providers=api_providers,
+            upstream_proxies=upstream_proxies,
             proxies=proxies
         )
     
@@ -379,7 +426,7 @@ class ConfigManager:
         Returns:
             Dict[str, Any]: 配置字典
         """
-        return {
+        result = {
             'system': {
                 'web_port': config.system.web_port,
                 'web_auth': {
@@ -424,18 +471,24 @@ class ConfigManager:
                 }
                 for provider in config.api_providers
             ],
+            'upstream_proxies': [
+                {
+                    'id': upstream.id,
+                    'name': upstream.name,
+                    'enabled': upstream.enabled,
+                    'description': upstream.description,
+                    'tags': upstream.tags,
+                    'proxy': self._upstream_proxy_to_dict(upstream.proxy)
+                }
+                for upstream in config.upstream_proxies
+            ],
             'proxies': [
                 {
                     'local_port': proxy.local_port,
                     'name': proxy.name,
+                    'upstream_id': proxy.upstream_id,  # 新增：引用出口代理池
                     'api_provider_id': proxy.api_provider_id,
-                    'upstream': {
-                        'server': proxy.upstream.server,
-                        'port': proxy.upstream.port,
-                        'username': proxy.upstream.username,
-                        'password': proxy.upstream.password,
-                        'protocol': proxy.upstream.protocol
-                    } if proxy.upstream else None,
+                    'upstream': self._upstream_proxy_to_dict(proxy.upstream) if proxy.upstream else None,
                     'monitoring_enabled': proxy.monitoring_enabled,
                     'local_username': proxy.local_username,
                     'local_password': proxy.local_password
@@ -443,3 +496,31 @@ class ConfigManager:
                 for proxy in config.proxies
             ]
         }
+        return result
+    
+    def _upstream_proxy_to_dict(self, upstream: UpstreamProxy) -> Dict[str, Any]:
+        """将 UpstreamProxy 对象转换为字典"""
+        result = {
+            'server': upstream.server,
+            'port': upstream.port,
+            'username': upstream.username,
+            'password': upstream.password,
+            'protocol': upstream.protocol
+        }
+        
+        # 添加 VLESS 特定字段
+        if upstream.protocol == 'vless':
+            result.update({
+                'uuid': upstream.uuid,
+                'flow': upstream.flow,
+                'encryption': upstream.encryption,
+                'network': upstream.network,
+                'tls': upstream.tls,
+                'sni': upstream.sni,
+                'alpn': upstream.alpn,
+                'ws_path': upstream.ws_path,
+                'ws_host': upstream.ws_host,
+                'grpc_service_name': upstream.grpc_service_name
+            })
+        
+        return result

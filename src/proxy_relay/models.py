@@ -26,6 +26,26 @@ class UpstreamProxy:
     username: Optional[str] = None
     password: Optional[str] = None
     protocol: str = "socks5"
+    # VLESS 特定配置
+    uuid: Optional[str] = None  # VLESS UUID
+    flow: Optional[str] = None  # VLESS flow (如 xtls-rprx-vision)
+    encryption: str = "none"  # VLESS 加密方式，默认 none
+    network: str = "tcp"  # 传输协议: tcp, ws, grpc, http
+    # 传输层配置
+    tls: bool = False  # 是否启用 TLS
+    sni: Optional[str] = None  # TLS SNI
+    alpn: Optional[List[str]] = None  # ALPN
+    # Reality 配置 (VLESS Reality)
+    reality: bool = False  # 是否启用 Reality
+    reality_public_key: Optional[str] = None  # Reality 公钥
+    reality_short_id: Optional[str] = None  # Reality 短 ID
+    reality_server_name: Optional[str] = None  # Reality 握手服务器名称（通常与 SNI 相同）
+    reality_fingerprint: Optional[str] = None  # uTLS 指纹 (chrome, firefox, safari, etc.)
+    # WebSocket 配置
+    ws_path: Optional[str] = None  # WebSocket 路径
+    ws_host: Optional[str] = None  # WebSocket Host
+    # gRPC 配置
+    grpc_service_name: Optional[str] = None  # gRPC service name
     
     def __post_init__(self):
         """数据验证"""
@@ -35,8 +55,22 @@ class UpstreamProxy:
             raise TypeError("port must be an integer")
         if not (1 <= self.port <= 65535):
             raise ValueError(f"port must be between 1 and 65535, got {self.port}")
-        if self.protocol not in ["socks5", "http", "https"]:
-            raise ValueError(f"protocol must be socks5, http, or https, got {self.protocol}")
+        if self.protocol not in ["socks5", "http", "https", "vless"]:
+            raise ValueError(f"protocol must be socks5, http, https, or vless, got {self.protocol}")
+        
+        # VLESS 协议特定验证
+        if self.protocol == "vless":
+            if not self.uuid:
+                raise ValueError("uuid is required for vless protocol")
+            if self.network not in ["tcp", "ws", "grpc", "http"]:
+                raise ValueError(f"network must be tcp, ws, grpc, or http, got {self.network}")
+            
+            # Reality 验证
+            if self.reality:
+                if not self.reality_public_key:
+                    raise ValueError("reality_public_key is required when reality is enabled")
+                if not self.reality_short_id:
+                    raise ValueError("reality_short_id is required when reality is enabled")
 
 
 @dataclass
@@ -93,12 +127,33 @@ class APIProviderConfig:
 
 
 @dataclass
+class UpstreamProxyPool:
+    """出口代理池配置"""
+    id: str  # 唯一标识符
+    name: str  # 显示名称
+    proxy: UpstreamProxy  # 代理配置
+    enabled: bool = True  # 是否启用
+    description: Optional[str] = None  # 描述
+    tags: Optional[List[str]] = None  # 标签（如：美国、日本、高速）
+    
+    def __post_init__(self):
+        """数据验证"""
+        if not self.id:
+            raise ValueError("id cannot be empty")
+        if not self.name:
+            raise ValueError("name cannot be empty")
+        if not isinstance(self.proxy, UpstreamProxy):
+            raise TypeError("proxy must be an UpstreamProxy instance")
+
+
+@dataclass
 class ProxyConfig:
     """代理配置"""
     local_port: int
     name: str
+    upstream_id: Optional[str] = None  # 引用出口代理池中的 ID
     api_provider_id: Optional[str] = None  # 可选，仅在使用 API 获取上游代理时需要
-    upstream: Optional[UpstreamProxy] = None  # 可选，如果为 None 则使用 direct 模式
+    upstream: Optional[UpstreamProxy] = None  # 可选，如果为 None 则使用 direct 模式（向后兼容）
     monitoring_enabled: bool = False
     # SOCKS5 本地认证配置（可选）
     local_username: Optional[str] = None
@@ -117,8 +172,8 @@ class ProxyConfig:
         if self.upstream is not None and not isinstance(self.upstream, UpstreamProxy):
             raise TypeError("upstream must be an UpstreamProxy instance or None")
         
-        # 如果启用监控但没有上游代理，禁用监控
-        if self.monitoring_enabled and self.upstream is None:
+        # 如果启用监控但没有上游代理和上游ID，报错
+        if self.monitoring_enabled and self.upstream is None and not self.upstream_id:
             raise ValueError("monitoring cannot be enabled for direct mode proxies")
 
 
@@ -188,6 +243,7 @@ class Config:
     system: SystemConfig
     monitoring: MonitoringConfig
     api_providers: List[APIProviderConfig]
+    upstream_proxies: List[UpstreamProxyPool]  # 出口代理池
     proxies: List[ProxyConfig]
     
     def __post_init__(self):
@@ -198,6 +254,8 @@ class Config:
             raise TypeError("monitoring must be a MonitoringConfig instance")
         if not isinstance(self.api_providers, list):
             raise TypeError("api_providers must be a list")
+        if not isinstance(self.upstream_proxies, list):
+            raise TypeError("upstream_proxies must be a list")
         if not isinstance(self.proxies, list):
             raise TypeError("proxies must be a list")
         
@@ -211,13 +269,20 @@ class Config:
         if len(provider_ids) != len(set(provider_ids)):
             raise ValueError("duplicate id found in api_providers")
         
+        # 验证出口代理池ID不重复
+        upstream_ids = [u.id for u in self.upstream_proxies]
+        if len(upstream_ids) != len(set(upstream_ids)):
+            raise ValueError("duplicate id found in upstream_proxies")
+        
         # 验证所有代理引用的API提供商存在（如果指定了 API 提供商）
         for proxy in self.proxies:
             if proxy.api_provider_id is not None and proxy.api_provider_id not in provider_ids:
                 raise ValueError(f"proxy {proxy.name} references non-existent api_provider_id: {proxy.api_provider_id}")
             
-            # 如果没有上游代理也没有 API 提供商，这是 direct 模式，允许
-            # 如果有 API 提供商但没有上游代理，这是 API 模式，允许
+            # 验证引用的出口代理存在
+            if proxy.upstream_id is not None and proxy.upstream_id not in upstream_ids:
+                raise ValueError(f"proxy {proxy.name} references non-existent upstream_id: {proxy.upstream_id}")
+            
             # 如果有上游代理，验证其类型
             if proxy.upstream is not None and not isinstance(proxy.upstream, UpstreamProxy):
                 raise TypeError(f"proxy {proxy.name} upstream must be an UpstreamProxy instance or None")

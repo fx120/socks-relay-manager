@@ -57,6 +57,58 @@ monitoring:
   check_url: "http://www.google.com"
 
 # ----------------------------------------------------------------------------
+# 出口代理池配置 (v1.2.0 新增)
+# ----------------------------------------------------------------------------
+# 集中管理所有出口代理，支持多个本地代理复用
+upstream_proxies:
+  # VLESS 代理示例 - WebSocket + TLS
+  - id: "us-node-1"
+    name: "美国节点1"
+    enabled: true
+    description: "高速美国节点"
+    tags: ["美国", "高速", "稳定"]
+    proxy:
+      server: "vless.example.com"
+      port: 443
+      protocol: "vless"
+      uuid: "550e8400-e29b-41d4-a716-446655440000"  # ⚠️ 替换为实际 UUID
+      network: "ws"
+      tls: true
+      sni: "vless.example.com"
+      alpn: ["h2", "http/1.1"]
+      ws_path: "/ws"
+      ws_host: "vless.example.com"
+  
+  # VLESS 代理示例 - gRPC + TLS
+  - id: "jp-node-1"
+    name: "日本节点1"
+    enabled: true
+    description: "日本高速节点"
+    tags: ["日本", "高速", "游戏"]
+    proxy:
+      server: "jp.example.com"
+      port: 443
+      protocol: "vless"
+      uuid: "660e8400-e29b-41d4-a716-446655440001"  # ⚠️ 替换为实际 UUID
+      network: "grpc"
+      tls: true
+      sni: "jp.example.com"
+      grpc_service_name: "myservice"
+  
+  # SOCKS5 代理示例
+  - id: "socks5-node-1"
+    name: "SOCKS5代理1"
+    enabled: true
+    description: "备用 SOCKS5 代理"
+    tags: ["备用", "SOCKS5"]
+    proxy:
+      server: "socks5.example.com"
+      port: 1080
+      protocol: "socks5"
+      username: "proxy_user"      # 如需认证
+      password: "proxy_password"  # 如需认证
+
+# ----------------------------------------------------------------------------
 # API提供商配置
 # ----------------------------------------------------------------------------
 # 支持配置多个API提供商，系统会按顺序尝试获取代理
@@ -131,51 +183,48 @@ api_providers:
 # ----------------------------------------------------------------------------
 # 配置本地SOCKS5代理端口及其对应的上游代理
 proxies:
-  # 代理端口1 - 基本配置示例
-  - local_port: 1080  # 本地监听端口（1024-65535）
-    name: "代理端口1"  # 代理名称（用于标识）
-    api_provider_id: "91http"  # 使用的API提供商ID
+  # ========== v1.2.0 新方式：使用出口代理池 ==========
+  
+  # 代理端口1 - 引用出口代理池
+  - local_port: 1080
+    name: "代理端口1"
+    upstream_id: "us-node-1"  # 引用出口代理池中的 ID
+    monitoring_enabled: true
+  
+  # 代理端口2 - 引用另一个出口代理
+  - local_port: 1081
+    name: "代理端口2"
+    upstream_id: "jp-node-1"
+    monitoring_enabled: true
+  
+  # 代理端口3 - 引用 SOCKS5 代理
+  - local_port: 1082
+    name: "代理端口3"
+    upstream_id: "socks5-node-1"
+    monitoring_enabled: false
+  
+  # ========== v1.1.0 旧方式：直接配置（向后兼容）==========
+  
+  # 代理端口4 - 直接配置上游代理（不使用出口代理池）
+  - local_port: 1083
+    name: "代理端口4（直接配置）"
+    api_provider_id: "91http"  # 可选，仅在使用 API 获取上游代理时需要
     
     # 上游代理配置
     upstream:
-      server: "proxy1.example.com"  # 上游代理服务器地址
-      port: 10000                   # 上游代理端口
-      username: null                # 认证用户名（null表示不需要认证）
-      password: null                # 认证密码
-      protocol: "socks5"            # 代理协议
-    
-    # 是否启用自动监控和切换
-    monitoring_enabled: false
-  
-  # 代理端口2 - 启用监控示例
-  - local_port: 1081
-    name: "代理端口2"
-    api_provider_id: "91http"
-    
-    upstream:
-      server: "proxy2.example.com"
-      port: 10001
+      server: "proxy4.example.com"
+      port: 10000
       username: null
       password: null
       protocol: "socks5"
     
-    # 启用监控后，系统会自动检查此代理的健康状态
-    # 当检测到失败时，会自动从API获取新代理并切换
-    monitoring_enabled: true
+    monitoring_enabled: false
   
-  # 代理端口3 - 带认证的上游代理示例
-  - local_port: 1082
-    name: "代理端口3（带认证）"
-    api_provider_id: "91http"
-    
-    upstream:
-      server: "proxy3.example.com"
-      port: 10002
-      username: "proxy_user"      # 上游代理需要认证时填写
-      password: "proxy_password"  # 上游代理密码
-      protocol: "socks5"
-    
-    monitoring_enabled: true
+  # 代理端口5 - 直连模式（不使用上游代理）
+  - local_port: 1084
+    name: "直连代理"
+    # 不指定 upstream_id 和 upstream，使用直连模式
+    monitoring_enabled: false
 
 # ============================================================================
 # 配置说明
@@ -196,13 +245,20 @@ proxies:
 #    - 测试API连接: proxy-relay test-api <provider_id>
 #    - 可配置多个提供商作为备份
 #
-# 4. 安全建议：
+# 4. VLESS 配置：
+#    - 支持多种传输协议: tcp, ws, grpc, http
+#    - 支持 TLS/XTLS 加密
+#    - 可使用 import-vless 命令快速导入
+#    - 详细说明: docs/VLESS_SUPPORT.md
+#
+# 5. 安全建议：
 #    - 修改默认的Web管理员密码
 #    - 限制Web界面访问（使用防火墙或反向代理）
 #    - 定期更新API密钥
+#    - 保护 VLESS UUID，不要泄露
 #    - 不要将包含真实凭据的config.yaml提交到版本控制
 #
-# 5. 性能调优：
+# 6. 性能调优：
 #    - check_interval: 根据代理稳定性调整，稳定的代理可以增加间隔
 #    - failure_threshold: 增加阈值可以减少误切换，但会延长故障检测时间
 #    - 同时运行的代理数量建议不超过20个

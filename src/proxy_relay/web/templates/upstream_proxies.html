@@ -1,0 +1,867 @@
+{% extends "base.html" %}
+
+{% block title %}出口代理池 - 代理中转系统{% endblock %}
+
+{% block content %}
+<div x-data="upstreamProxiesApp()">
+    <!-- Header -->
+    <div class="mb-6">
+        <h2 class="text-3xl font-bold text-gray-800 mb-2">
+            <i class="fas fa-cloud mr-2"></i>
+            出口代理池管理
+        </h2>
+        <p class="text-gray-600">集中管理所有出口代理服务器，支持多个本地代理复用</p>
+    </div>
+
+    <!-- Action Bar -->
+    <div class="bg-white rounded-lg shadow-sm p-4 mb-6">
+        <div class="flex justify-between items-center">
+            <div class="flex space-x-2">
+                <button 
+                    @click="showAddModal = true"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition flex items-center"
+                >
+                    <i class="fas fa-plus mr-2"></i>
+                    添加出口代理
+                </button>
+                
+                <button 
+                    @click="loadUpstreamProxies()"
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition flex items-center"
+                >
+                    <i class="fas fa-sync-alt mr-2"></i>
+                    刷新
+                </button>
+            </div>
+            
+            <div class="text-sm text-gray-600">
+                共 <span x-text="upstreamProxies.length" class="font-bold text-blue-600"></span> 个出口代理
+            </div>
+        </div>
+    </div>
+
+    <!-- Upstream Proxies List -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">服务器</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">协议</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">标签</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">使用情况</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-if="loading">
+                        <tr>
+                            <td colspan="7" class="px-6 py-12 text-center">
+                                <i class="fas fa-spinner fa-spin text-3xl text-gray-400"></i>
+                                <p class="mt-2 text-gray-500">加载中...</p>
+                            </td>
+                        </tr>
+                    </template>
+                    
+                    <template x-if="!loading && upstreamProxies.length === 0">
+                        <tr>
+                            <td colspan="7" class="px-6 py-12 text-center">
+                                <i class="fas fa-inbox text-5xl text-gray-300 mb-4"></i>
+                                <p class="text-gray-500">暂无出口代理</p>
+                                <button 
+                                    @click="showAddModal = true"
+                                    class="mt-4 text-blue-500 hover:text-blue-600"
+                                >
+                                    <i class="fas fa-plus mr-1"></i>
+                                    添加第一个出口代理
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                    
+                    <template x-for="upstream in upstreamProxies" :key="upstream.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center">
+                                    <div>
+                                        <div class="text-sm font-medium text-gray-900" x-text="upstream.name"></div>
+                                        <div class="text-xs text-gray-500" x-text="upstream.id"></div>
+                                        <div class="text-xs text-gray-400 mt-1" x-text="upstream.description"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="text-sm text-gray-900" x-text="upstream.proxy.server"></div>
+                                <div class="text-xs text-gray-500" x-text="':' + upstream.proxy.port"></div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="{
+                                        'bg-purple-100 text-purple-800': upstream.proxy.protocol === 'vless',
+                                        'bg-blue-100 text-blue-800': upstream.proxy.protocol === 'socks5',
+                                        'bg-green-100 text-green-800': upstream.proxy.protocol === 'http'
+                                    }"
+                                    x-text="upstream.proxy.protocol.toUpperCase()"
+                                ></span>
+                                <template x-if="upstream.proxy.protocol === 'vless' && upstream.proxy.network">
+                                    <span class="ml-1 text-xs text-gray-500" x-text="'(' + upstream.proxy.network + ')'"></span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex flex-wrap gap-1">
+                                    <template x-if="upstream.tags && upstream.tags.length > 0">
+                                        <template x-for="tag in upstream.tags" :key="tag">
+                                            <span class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded" x-text="tag"></span>
+                                        </template>
+                                    </template>
+                                    <template x-if="!upstream.tags || upstream.tags.length === 0">
+                                        <span class="text-xs text-gray-400">无标签</span>
+                                    </template>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="text-sm">
+                                    <span 
+                                        class="font-medium"
+                                        :class="upstream.usage_count > 0 ? 'text-blue-600' : 'text-gray-400'"
+                                        x-text="upstream.usage_count"
+                                    ></span>
+                                    <span class="text-gray-500 ml-1">个本地代理</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span 
+                                    class="px-2 py-1 text-xs font-semibold rounded-full"
+                                    :class="upstream.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                    x-text="upstream.enabled ? '已启用' : '已禁用'"
+                                ></span>
+                            </td>
+                            <td class="px-6 py-4 text-sm">
+                                <div class="flex space-x-2">
+                                    <button 
+                                        @click="testUpstream(upstream.id)"
+                                        class="text-blue-600 hover:text-blue-800"
+                                        title="测试连接"
+                                    >
+                                        <i class="fas fa-vial"></i>
+                                    </button>
+                                    <button 
+                                        @click="editUpstream(upstream)"
+                                        class="text-green-600 hover:text-green-800"
+                                        title="编辑"
+                                    >
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button 
+                                        @click="deleteUpstream(upstream)"
+                                        class="text-red-600 hover:text-red-800"
+                                        title="删除"
+                                        :disabled="upstream.usage_count > 0"
+                                        :class="upstream.usage_count > 0 ? 'opacity-50 cursor-not-allowed' : ''"
+                                    >
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div 
+        x-show="showAddModal || showEditModal"
+        x-cloak
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="closeModal()"
+    >
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-2xl font-bold text-gray-800">
+                        <span x-show="showAddModal">添加出口代理</span>
+                        <span x-show="showEditModal">编辑出口代理</span>
+                    </h3>
+                    <button @click="closeModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <form @submit.prevent="saveUpstream()">
+                    <!-- Basic Info -->
+                    <div class="space-y-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">ID *</label>
+                            <input 
+                                type="text" 
+                                x-model="formData.id"
+                                :disabled="showEditModal"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="例如: us-node-1"
+                                required
+                            >
+                            <p class="mt-1 text-xs text-gray-500">唯一标识符，创建后不可修改</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">名称 *</label>
+                            <input 
+                                type="text" 
+                                x-model="formData.name"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="例如: 美国节点1"
+                                required
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">描述</label>
+                            <textarea 
+                                x-model="formData.description"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                rows="2"
+                                placeholder="可选的描述信息"
+                            ></textarea>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">标签</label>
+                            <input 
+                                type="text" 
+                                x-model="formData.tagsInput"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="用逗号分隔，例如: 美国,高速,稳定"
+                            >
+                        </div>
+
+                        <div class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                x-model="formData.enabled"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            >
+                            <label class="ml-2 block text-sm text-gray-700">启用此出口代理</label>
+                        </div>
+                    </div>
+
+                    <!-- Proxy Config -->
+                    <div class="border-t pt-6 space-y-4">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="text-lg font-semibold text-gray-800">代理配置</h4>
+                            <button 
+                                type="button"
+                                @click="showLinkImport = !showLinkImport"
+                                class="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                            >
+                                <span x-text="showLinkImport ? '手动配置' : '链接导入'"></span>
+                            </button>
+                        </div>
+
+                        <!-- 链接导入模式 -->
+                        <template x-if="showLinkImport">
+                            <div class="space-y-4 p-4 bg-blue-50 rounded-lg">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">VLESS 链接</label>
+                                    <textarea 
+                                        x-model="vlessLink"
+                                        rows="3"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+                                        placeholder="vless://uuid@server:port?参数..."
+                                    ></textarea>
+                                </div>
+                                <div class="flex space-x-3">
+                                    <button 
+                                        type="button"
+                                        @click="parseVLESSLink()"
+                                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                    >
+                                        解析链接
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        @click="vlessLink = ''; showLinkImport = false"
+                                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                    >
+                                        取消
+                                    </button>
+                                </div>
+                                <template x-if="parsedInfo">
+                                    <div class="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                        <p class="text-sm text-green-800">
+                                            ✓ 解析成功：<span x-text="parsedInfo"></span>
+                                        </p>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- 手动配置模式 -->
+                        <template x-if="!showLinkImport">
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">服务器地址 *</label>
+                                        <input 
+                                            type="text" 
+                                            x-model="formData.proxy.server"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            placeholder="例如: proxy.example.com"
+                                            required
+                                        >
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">端口 *</label>
+                                        <input 
+                                            type="number" 
+                                            x-model.number="formData.proxy.port"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            placeholder="443"
+                                            min="1"
+                                            max="65535"
+                                            required
+                                        >
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">协议 *</label>
+                                    <select 
+                                        x-model="formData.proxy.protocol"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        @change="onProtocolChange()"
+                                    >
+                                        <option value="socks5">SOCKS5</option>
+                                        <option value="http">HTTP</option>
+                                        <option value="vless">VLESS</option>
+                                    </select>
+                                </div>
+
+                                <!-- SOCKS5/HTTP Auth -->
+                                <template x-if="formData.proxy.protocol === 'socks5' || formData.proxy.protocol === 'http'">
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">用户名</label>
+                                            <input 
+                                                type="text" 
+                                                x-model="formData.proxy.username"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="可选"
+                                            >
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">密码</label>
+                                            <input 
+                                                type="password" 
+                                                x-model="formData.proxy.password"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="可选"
+                                            >
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- VLESS Config -->
+                                <template x-if="formData.proxy.protocol === 'vless'">
+                                    <div class="space-y-4 p-4 bg-purple-50 rounded-lg">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">UUID *</label>
+                                            <input 
+                                                type="text" 
+                                                x-model="formData.proxy.uuid"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="550e8400-e29b-41d4-a716-446655440000"
+                                                required
+                                            >
+                                        </div>
+
+                                        <div class="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">传输协议</label>
+                                                <select 
+                                                    x-model="formData.proxy.network"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                >
+                                                    <option value="tcp">TCP</option>
+                                                    <option value="ws">WebSocket</option>
+                                                    <option value="grpc">gRPC</option>
+                                                    <option value="http">HTTP/2</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">Flow</label>
+                                                <input 
+                                                    type="text" 
+                                                    x-model="formData.proxy.flow"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    placeholder="xtls-rprx-vision"
+                                                >
+                                            </div>
+                                        </div>
+
+                                        <div class="flex items-center">
+                                            <input 
+                                                type="checkbox" 
+                                                x-model="formData.proxy.tls"
+                                                class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                            >
+                                            <label class="ml-2 block text-sm text-gray-700">启用 TLS</label>
+                                        </div>
+
+                                        <template x-if="formData.proxy.tls">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">SNI</label>
+                                                <input 
+                                                    type="text" 
+                                                    x-model="formData.proxy.sni"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    placeholder="example.com"
+                                                >
+                                            </div>
+                                        </template>
+
+                                        <!-- Reality 配置 -->
+                                        <template x-if="formData.proxy.tls">
+                                            <div class="flex items-center">
+                                                <input 
+                                                    type="checkbox" 
+                                                    x-model="formData.proxy.reality"
+                                                    class="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                                >
+                                                <label class="ml-2 block text-sm text-gray-700">启用 Reality</label>
+                                            </div>
+                                        </template>
+
+                                        <template x-if="formData.proxy.tls && formData.proxy.reality">
+                                            <div class="space-y-4 p-4 bg-purple-100 rounded-lg border-2 border-purple-300">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">Public Key *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.proxy.reality_public_key"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm"
+                                                        placeholder="kly0cTgftLELFTNlVKfTD7FgGaM7LIBM6lcm6zUelnw"
+                                                    >
+                                                    <p class="mt-1 text-xs text-gray-500">Reality 公钥（43 字符）</p>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">Short ID *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.proxy.reality_short_id"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm"
+                                                        placeholder="382d853335"
+                                                    >
+                                                    <p class="mt-1 text-xs text-gray-500">Reality 短 ID（1-16 个十六进制字符）</p>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">Server Name</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.proxy.reality_server_name"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                        placeholder="www.yahoo.com"
+                                                    >
+                                                    <p class="mt-1 text-xs text-gray-500">Reality 握手服务器名称（通常与 SNI 相同）</p>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">uTLS Fingerprint</label>
+                                                    <select 
+                                                        x-model="formData.proxy.reality_fingerprint"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                    >
+                                                        <option value="">选择指纹</option>
+                                                        <option value="chrome">Chrome</option>
+                                                        <option value="firefox">Firefox</option>
+                                                        <option value="safari">Safari</option>
+                                                        <option value="edge">Edge</option>
+                                                        <option value="360">360</option>
+                                                        <option value="qq">QQ</option>
+                                                        <option value="ios">iOS</option>
+                                                        <option value="android">Android</option>
+                                                        <option value="random">Random</option>
+                                                        <option value="randomized">Randomized</option>
+                                                    </select>
+                                                    <p class="mt-1 text-xs text-gray-500">客户端 TLS 指纹模拟</p>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <template x-if="formData.proxy.network === 'ws'">
+                                            <div class="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">WS Path</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.proxy.ws_path"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                        placeholder="/ws"
+                                                    >
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 mb-2">WS Host</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.proxy.ws_host"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                        placeholder="example.com"
+                                                    >
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <template x-if="formData.proxy.network === 'grpc'">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">gRPC Service Name</label>
+                                                <input 
+                                                    type="text" 
+                                                    x-model="formData.proxy.grpc_service_name"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    placeholder="myservice"
+                                                >
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex justify-end space-x-3 mt-6 pt-6 border-t">
+                        <button 
+                            type="button"
+                            @click="closeModal()"
+                            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                        >
+                            取消
+                        </button>
+                        <button 
+                            type="submit"
+                            class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition"
+                            :disabled="saving"
+                        >
+                            <span x-show="!saving">保存</span>
+                            <span x-show="saving">
+                                <i class="fas fa-spinner fa-spin mr-2"></i>
+                                保存中...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function upstreamProxiesApp() {
+    return {
+        upstreamProxies: [],
+        loading: false,
+        saving: false,
+        showAddModal: false,
+        showEditModal: false,
+        showLinkImport: false,
+        vlessLink: '',
+        parsedInfo: '',
+        formData: {
+            id: '',
+            name: '',
+            description: '',
+            tagsInput: '',
+            enabled: true,
+            proxy: {
+                server: '',
+                port: 443,
+                protocol: 'vless',
+                username: '',
+                password: '',
+                uuid: '',
+                flow: '',
+                encryption: 'none',
+                network: 'tcp',
+                tls: true,
+                sni: '',
+                alpn: null,
+                reality: false,
+                reality_public_key: '',
+                reality_short_id: '',
+                reality_server_name: '',
+                reality_fingerprint: '',
+                ws_path: '',
+                ws_host: '',
+                grpc_service_name: ''
+            }
+        },
+
+        init() {
+            this.loadUpstreamProxies();
+        },
+
+        async loadUpstreamProxies() {
+            this.loading = true;
+            try {
+                const response = await fetch('/api/upstream-proxies');
+                const data = await response.json();
+                this.upstreamProxies = data.upstream_proxies || [];
+            } catch (error) {
+                this.notify('加载出口代理失败: ' + error.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async saveUpstream() {
+            this.saving = true;
+            try {
+                // 处理标签
+                const tags = this.formData.tagsInput 
+                    ? this.formData.tagsInput.split(',').map(t => t.trim()).filter(t => t)
+                    : [];
+
+                const payload = {
+                    id: this.formData.id,
+                    name: this.formData.name,
+                    description: this.formData.description || null,
+                    tags: tags.length > 0 ? tags : null,
+                    enabled: this.formData.enabled,
+                    proxy: { ...this.formData.proxy }
+                };
+
+                // 清理空字段
+                Object.keys(payload.proxy).forEach(key => {
+                    if (payload.proxy[key] === '' || payload.proxy[key] === null) {
+                        delete payload.proxy[key];
+                    }
+                });
+
+                const url = this.showEditModal 
+                    ? `/api/upstream-proxies/${this.formData.id}`
+                    : '/api/upstream-proxies';
+                
+                const method = this.showEditModal ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '操作失败');
+                }
+
+                this.notify(this.showEditModal ? '更新成功' : '添加成功', 'success');
+                this.closeModal();
+                await this.loadUpstreamProxies();
+            } catch (error) {
+                this.notify('保存失败: ' + error.message, 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        editUpstream(upstream) {
+            this.formData = {
+                id: upstream.id,
+                name: upstream.name,
+                description: upstream.description || '',
+                tagsInput: upstream.tags ? upstream.tags.join(', ') : '',
+                enabled: upstream.enabled,
+                proxy: { ...upstream.proxy }
+            };
+            this.showEditModal = true;
+        },
+
+        async deleteUpstream(upstream) {
+            if (upstream.usage_count > 0) {
+                this.notify('无法删除：此出口代理正在被 ' + upstream.usage_count + ' 个本地代理使用', 'error');
+                return;
+            }
+
+            if (!confirm(`确定要删除出口代理 "${upstream.name}" 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/upstream-proxies/${upstream.id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '删除失败');
+                }
+
+                this.notify('删除成功', 'success');
+                await this.loadUpstreamProxies();
+            } catch (error) {
+                this.notify('删除失败: ' + error.message, 'error');
+            }
+        },
+
+        async testUpstream(upstreamId) {
+            try {
+                this.notify('正在测试连接...', 'info');
+                const response = await fetch(`/api/upstream-proxies/${upstreamId}/test`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                
+                if (data.healthy) {
+                    this.notify(`测试成功！响应时间: ${data.response_time_ms}ms`, 'success');
+                } else {
+                    this.notify(`测试失败: ${data.error_message}`, 'error');
+                }
+            } catch (error) {
+                this.notify('测试失败: ' + error.message, 'error');
+            }
+        },
+
+        closeModal() {
+            this.showAddModal = false;
+            this.showEditModal = false;
+            this.showLinkImport = false;
+            this.vlessLink = '';
+            this.parsedInfo = '';
+            this.resetForm();
+        },
+
+        resetForm() {
+            this.formData = {
+                id: '',
+                name: '',
+                description: '',
+                tagsInput: '',
+                enabled: true,
+                proxy: {
+                    server: '',
+                    port: 443,
+                    protocol: 'vless',
+                    username: '',
+                    password: '',
+                    uuid: '',
+                    flow: '',
+                    encryption: 'none',
+                    network: 'tcp',
+                    tls: true,
+                    sni: '',
+                    alpn: null,
+                    reality: false,
+                    reality_public_key: '',
+                    reality_short_id: '',
+                    reality_server_name: '',
+                    reality_fingerprint: '',
+                    ws_path: '',
+                    ws_host: '',
+                    grpc_service_name: ''
+                }
+            };
+        },
+
+        async parseVLESSLink() {
+            if (!this.vlessLink) {
+                this.notify('请输入 VLESS 链接', 'error');
+                return;
+            }
+            
+            this.loading = true;
+            this.parsedInfo = '';
+            
+            try {
+                const response = await fetch('/api/proxies/parse-vless', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        link: this.vlessLink
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // 自动填充表单
+                    this.formData.proxy = {
+                        server: data.server,
+                        port: data.port,
+                        protocol: data.protocol,
+                        uuid: data.uuid || '',
+                        flow: data.flow || '',
+                        encryption: data.encryption || 'none',
+                        network: data.network || 'tcp',
+                        tls: data.tls || false,
+                        sni: data.sni || '',
+                        alpn: data.alpn || null,
+                        reality: data.reality || false,
+                        reality_public_key: data.reality_public_key || '',
+                        reality_short_id: data.reality_short_id || '',
+                        reality_server_name: data.reality_server_name || '',
+                        reality_fingerprint: data.reality_fingerprint || '',
+                        ws_path: data.ws_path || '',
+                        ws_host: data.ws_host || '',
+                        grpc_service_name: data.grpc_service_name || '',
+                        username: '',
+                        password: ''
+                    };
+                    
+                    this.parsedInfo = '链接解析成功！已自动填充配置信息';
+                    this.showLinkImport = false;
+                    this.notify('链接解析成功', 'success');
+                } else {
+                    const error = await response.json();
+                    this.notify(error.detail || '链接解析失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to parse VLESS link:', error);
+                this.notify('链接解析失败: ' + error.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        onProtocolChange() {
+            // 清空协议特定字段
+            if (this.formData.proxy.protocol !== 'vless') {
+                this.formData.proxy.uuid = '';
+                this.formData.proxy.flow = '';
+                this.formData.proxy.network = 'tcp';
+                this.formData.proxy.tls = false;
+                this.formData.proxy.reality = false;
+                this.formData.proxy.reality_public_key = '';
+                this.formData.proxy.reality_short_id = '';
+                this.formData.proxy.reality_server_name = '';
+                this.formData.proxy.reality_fingerprint = '';
+            }
+            if (this.formData.proxy.protocol === 'vless') {
+                this.formData.proxy.username = '';
+                this.formData.proxy.password = '';
+            }
+        },
+
+        notify(message, type = 'success') {
+            window.dispatchEvent(new CustomEvent('notify', {
+                detail: { message, type }
+            }));
+        }
+    }
+}
+</script>
+{% endblock %}

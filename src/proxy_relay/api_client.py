@@ -247,13 +247,38 @@ class APIClient:
         if format_config.password_field:
             password = proxy_data.get(format_config.password_field)
         
-        return UpstreamProxy(
-            server=server,
-            port=int(port),
-            username=username,
-            password=password,
-            protocol="socks5"
-        )
+        # 检查是否有协议字段
+        protocol = proxy_data.get("protocol", "socks5")
+        
+        # 如果是 VLESS 协议，提取额外字段
+        if protocol == "vless":
+            uuid = proxy_data.get("uuid")
+            if not uuid:
+                raise APIError("UUID is required for VLESS protocol")
+            
+            return UpstreamProxy(
+                server=server,
+                port=int(port),
+                protocol="vless",
+                uuid=uuid,
+                flow=proxy_data.get("flow"),
+                encryption=proxy_data.get("encryption", "none"),
+                network=proxy_data.get("network", "tcp"),
+                tls=proxy_data.get("tls", False),
+                sni=proxy_data.get("sni"),
+                alpn=proxy_data.get("alpn"),
+                ws_path=proxy_data.get("ws_path"),
+                ws_host=proxy_data.get("ws_host"),
+                grpc_service_name=proxy_data.get("grpc_service_name")
+            )
+        else:
+            return UpstreamProxy(
+                server=server,
+                port=int(port),
+                username=username,
+                password=password,
+                protocol=protocol
+            )
     
     def _parse_custom_response(self, response: Dict[str, Any], format_config: ResponseFormat) -> UpstreamProxy:
         """
@@ -296,10 +321,35 @@ class APIClient:
         if format_config.password_field:
             password = data.get(format_config.password_field)
         
-        return UpstreamProxy(
-            server=server,
-            port=int(port),
-            username=username,
-            password=password,
-            protocol="socks5"
-        )
+        # 检查是否有协议字段
+        protocol = data.get("protocol", "socks5")
+        
+        # 如果是 VLESS 协议，提取额外字段
+        if protocol == "vless":
+            uuid = data.get("uuid")
+            if not uuid:
+                raise APIError("UUID is required for VLESS protocol")
+            
+            return UpstreamProxy(
+                server=server,
+                port=int(port),
+                protocol="vless",
+                uuid=uuid,
+                flow=data.get("flow"),
+                encryption=data.get("encryption", "none"),
+                network=data.get("network", "tcp"),
+                tls=data.get("tls", False),
+                sni=data.get("sni"),
+                alpn=data.get("alpn"),
+                ws_path=data.get("ws_path"),
+                ws_host=data.get("ws_host"),
+                grpc_service_name=data.get("grpc_service_name")
+            )
+        else:
+            return UpstreamProxy(
+                server=server,
+                port=int(port),
+                username=username,
+                password=password,
+                protocol=protocol
+            )

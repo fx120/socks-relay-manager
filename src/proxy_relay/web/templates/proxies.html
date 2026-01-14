@@ -61,12 +61,26 @@
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span 
                                     class="px-2 py-1 text-xs font-semibold rounded-full"
-                                    :class="proxy.upstream ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'"
-                                    x-text="proxy.upstream ? '代理模式' : '直连模式'"
+                                    :class="{
+                                        'bg-blue-100 text-blue-800': proxy.upstream || proxy.upstream_id,
+                                        'bg-green-100 text-green-800': !proxy.upstream && !proxy.upstream_id
+                                    }"
+                                    x-text="(proxy.upstream || proxy.upstream_id) ? '代理模式' : '直连模式'"
                                 ></span>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <template x-if="proxy.upstream">
+                                <template x-if="proxy.upstream_id">
+                                    <div class="text-sm text-gray-600">
+                                        <div class="flex items-center">
+                                            <i class="fas fa-database text-purple-500 mr-1 text-xs"></i>
+                                            <span x-text="proxy.upstream_id" class="text-purple-600 font-medium"></span>
+                                        </div>
+                                        <template x-if="proxy.upstream">
+                                            <div class="text-xs text-gray-400 mt-1" x-text="proxy.upstream.server + ':' + proxy.upstream.port"></div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="!proxy.upstream_id && proxy.upstream">
                                     <div class="text-sm text-gray-600">
                                         <div x-text="proxy.upstream.server + ':' + proxy.upstream.port"></div>
                                         <template x-if="proxy.upstream.username">
@@ -77,7 +91,7 @@
                                         </template>
                                     </div>
                                 </template>
-                                <template x-if="!proxy.upstream">
+                                <template x-if="!proxy.upstream && !proxy.upstream_id">
                                     <span class="text-sm text-gray-400">-</span>
                                 </template>
                             </td>
@@ -215,7 +229,16 @@
                             <!-- 选择配置方式 -->
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">配置方式</label>
-                                <div class="flex space-x-4">
+                                <div class="flex flex-wrap gap-x-4 gap-y-2">
+                                    <label class="flex items-center">
+                                        <input 
+                                            type="radio" 
+                                            x-model="formData.upstream_mode"
+                                            value="pool"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        >
+                                        <span class="ml-2 text-sm text-gray-700">从代理池选择</span>
+                                    </label>
                                     <label class="flex items-center">
                                         <input 
                                             type="radio" 
@@ -245,6 +268,48 @@
                                     </label>
                                 </div>
                             </div>
+                            
+                            <!-- 从代理池选择模式 -->
+                            <template x-if="formData.upstream_mode === 'pool'">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">选择出口代理 *</label>
+                                        <select 
+                                            x-model="formData.upstream_id"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="">请选择出口代理</option>
+                                            <template x-for="upstream in upstreamProxies.filter(u => u.enabled)" :key="upstream.id">
+                                                <option :value="upstream.id">
+                                                    <span x-text="upstream.name + ' (' + upstream.proxy.server + ':' + upstream.proxy.port + ' - ' + upstream.proxy.protocol.toUpperCase() + ')'"></span>
+                                                </option>
+                                            </template>
+                                        </select>
+                                        <template x-if="upstreamProxies.filter(u => u.enabled).length === 0">
+                                            <p class="mt-1 text-xs text-orange-600">
+                                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                                暂无可用的出口代理，请先在 <a href="/upstream-proxies" class="text-blue-600 hover:underline">出口代理池</a> 中添加
+                                            </p>
+                                        </template>
+                                    </div>
+                                    <template x-if="formData.upstream_id && getSelectedUpstream()">
+                                        <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <div class="flex items-center text-blue-700 mb-2">
+                                                <i class="fas fa-info-circle mr-2"></i>
+                                                <span class="text-sm font-medium">已选择出口代理</span>
+                                            </div>
+                                            <div class="text-xs text-gray-600 space-y-1">
+                                                <div><span class="font-medium">名称:</span> <span x-text="getSelectedUpstream()?.name"></span></div>
+                                                <div><span class="font-medium">服务器:</span> <span x-text="getSelectedUpstream()?.proxy.server + ':' + getSelectedUpstream()?.proxy.port"></span></div>
+                                                <div><span class="font-medium">协议:</span> <span x-text="getSelectedUpstream()?.proxy.protocol.toUpperCase()"></span></div>
+                                                <template x-if="getSelectedUpstream()?.description">
+                                                    <div><span class="font-medium">描述:</span> <span x-text="getSelectedUpstream()?.description"></span></div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
                             
                             <!-- 链接导入模式 -->
                             <template x-if="formData.upstream_mode === 'link'">
@@ -290,6 +355,40 @@
                                                             </template>
                                                         </div>
                                                     </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <!-- 同时添加到出口代理池 -->
+                                    <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                                        <div class="flex items-center">
+                                            <input 
+                                                type="checkbox" 
+                                                x-model="formData.add_to_pool"
+                                                id="add_to_pool_link"
+                                                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            >
+                                            <label for="add_to_pool_link" class="ml-2 text-sm text-gray-700">同时添加到出口代理池</label>
+                                        </div>
+                                        <template x-if="formData.add_to_pool">
+                                            <div class="mt-3 space-y-2">
+                                                <div>
+                                                    <label class="block text-xs font-medium text-gray-600 mb-1">代理池 ID *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.pool_id"
+                                                        placeholder="例如: vless-node-1"
+                                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    >
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs font-medium text-gray-600 mb-1">代理池名称 *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.pool_name"
+                                                        placeholder="例如: VLESS 节点 1"
+                                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    >
                                                 </div>
                                             </div>
                                         </template>
@@ -371,6 +470,41 @@
                                             <option value="https">HTTPS</option>
                                             <option value="vless">VLESS</option>
                                         </select>
+                                    </div>
+                                    
+                                    <!-- 同时添加到出口代理池 -->
+                                    <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                                        <div class="flex items-center">
+                                            <input 
+                                                type="checkbox" 
+                                                x-model="formData.add_to_pool"
+                                                id="add_to_pool_manual"
+                                                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            >
+                                            <label for="add_to_pool_manual" class="ml-2 text-sm text-gray-700">同时添加到出口代理池</label>
+                                        </div>
+                                        <template x-if="formData.add_to_pool">
+                                            <div class="mt-3 space-y-2">
+                                                <div>
+                                                    <label class="block text-xs font-medium text-gray-600 mb-1">代理池 ID *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.pool_id"
+                                                        placeholder="例如: socks5-node-1"
+                                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    >
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs font-medium text-gray-600 mb-1">代理池名称 *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        x-model="formData.pool_name"
+                                                        placeholder="例如: SOCKS5 节点 1"
+                                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    >
+                                                </div>
+                                            </div>
+                                        </template>
                                     </div>
                                 </div>
                             </template>
@@ -475,6 +609,7 @@ function proxiesData() {
     return {
         proxies: [],
         apiProviders: [],
+        upstreamProxies: [],
         showAddModal: false,
         showEditModal: false,
         showDeleteModal: false,
@@ -489,7 +624,8 @@ function proxiesData() {
             local_username: '',
             local_password: '',
             use_upstream: false,
-            upstream_mode: 'manual', // 'manual', 'link', or 'api'
+            upstream_mode: 'pool', // 'pool', 'manual', 'link', or 'api'
+            upstream_id: '',
             vless_link: '',
             api_provider_id: '',
             upstream: {
@@ -499,12 +635,16 @@ function proxiesData() {
                 password: '',
                 protocol: 'socks5'
             },
-            monitoring_enabled: false
+            monitoring_enabled: false,
+            add_to_pool: false,
+            pool_id: '',
+            pool_name: ''
         },
         
         async init() {
             await this.loadProxies();
             await this.loadAPIProviders();
+            await this.loadUpstreamProxies();
         },
         
         async loadProxies() {
@@ -530,6 +670,23 @@ function proxiesData() {
             } catch (error) {
                 console.error('Failed to load API providers:', error);
             }
+        },
+        
+        async loadUpstreamProxies() {
+            try {
+                const response = await fetch('/api/upstream-proxies');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.upstreamProxies = data.upstream_proxies || [];
+                }
+            } catch (error) {
+                console.error('Failed to load upstream proxies:', error);
+            }
+        },
+        
+        getSelectedUpstream() {
+            if (!this.formData.upstream_id) return null;
+            return this.upstreamProxies.find(u => u.id === this.formData.upstream_id);
         },
         
         async parseVLESSLink() {
@@ -573,7 +730,13 @@ function proxiesData() {
                         alpn: data.alpn,
                         ws_path: data.ws_path,
                         ws_host: data.ws_host,
-                        grpc_service_name: data.grpc_service_name
+                        grpc_service_name: data.grpc_service_name,
+                        // Reality 配置
+                        reality: data.reality,
+                        reality_public_key: data.reality_public_key,
+                        reality_short_id: data.reality_short_id,
+                        reality_server_name: data.reality_server_name,
+                        reality_fingerprint: data.reality_fingerprint
                     };
                     
                     this.notify('链接解析成功', 'success');
@@ -590,14 +753,26 @@ function proxiesData() {
         },
         
         editProxy(proxy) {
+            // 确定 upstream_mode
+            let upstreamMode = 'pool';
+            if (proxy.upstream_id) {
+                upstreamMode = 'pool';
+            } else if (proxy.api_provider_id) {
+                upstreamMode = 'api';
+            } else if (proxy.upstream) {
+                upstreamMode = 'manual';
+            }
+            
             this.formData = {
                 local_port: proxy.local_port,
                 name: proxy.name,
                 local_username: proxy.local_username || '',
                 local_password: proxy.local_password || '',
-                use_upstream: !!proxy.upstream,
-                upstream_mode: proxy.api_provider_id ? 'api' : 'manual',
+                use_upstream: !!(proxy.upstream || proxy.upstream_id),
+                upstream_mode: upstreamMode,
+                upstream_id: proxy.upstream_id || '',
                 api_provider_id: proxy.api_provider_id || '',
+                vless_link: '',
                 upstream: proxy.upstream ? {
                     server: proxy.upstream.server,
                     port: proxy.upstream.port,
@@ -611,7 +786,10 @@ function proxiesData() {
                     password: '',
                     protocol: 'socks5'
                 },
-                monitoring_enabled: proxy.monitoring_enabled
+                monitoring_enabled: proxy.monitoring_enabled,
+                add_to_pool: false,
+                pool_id: '',
+                pool_name: ''
             };
             this.showEditModal = true;
         },
@@ -631,7 +809,18 @@ function proxiesData() {
                 
                 // 如果使用出口代理
                 if (this.formData.use_upstream) {
-                    if (this.formData.upstream_mode === 'api') {
+                    if (this.formData.upstream_mode === 'pool') {
+                        // 从代理池选择模式
+                        if (!this.formData.upstream_id) {
+                            this.notify('请选择出口代理', 'error');
+                            this.saving = false;
+                            return;
+                        }
+                        data.upstream_id = this.formData.upstream_id;
+                        data.api_provider_id = null;
+                        data.fetch_from_api = false;
+                        data.upstream = null;
+                    } else if (this.formData.upstream_mode === 'api') {
                         // API 模式
                         if (!this.formData.api_provider_id) {
                             this.notify('请选择 API 提供商', 'error');
@@ -639,8 +828,9 @@ function proxiesData() {
                             return;
                         }
                         data.api_provider_id = this.formData.api_provider_id;
-                        data.fetch_from_api = true;  // 告诉后端从 API 获取上游代理
+                        data.fetch_from_api = true;
                         data.upstream = null;
+                        data.upstream_id = null;
                     } else if (this.formData.upstream_mode === 'link') {
                         // 链接导入模式
                         if (!this.parsedUpstream) {
@@ -648,9 +838,30 @@ function proxiesData() {
                             this.saving = false;
                             return;
                         }
+                        
+                        // 如果需要同时添加到代理池
+                        if (this.formData.add_to_pool) {
+                            if (!this.formData.pool_id || !this.formData.pool_name) {
+                                this.notify('请填写代理池 ID 和名称', 'error');
+                                this.saving = false;
+                                return;
+                            }
+                            // 先添加到代理池
+                            const poolAdded = await this.addToUpstreamPool(this.formData.upstream);
+                            if (poolAdded) {
+                                // 使用代理池 ID
+                                data.upstream_id = this.formData.pool_id;
+                                data.upstream = null;
+                            } else {
+                                this.saving = false;
+                                return;
+                            }
+                        } else {
+                            data.upstream = this.formData.upstream;
+                            data.upstream_id = null;
+                        }
                         data.api_provider_id = null;
                         data.fetch_from_api = false;
-                        data.upstream = this.formData.upstream;
                     } else {
                         // 手动模式
                         if (!this.formData.upstream.server || !this.formData.upstream.port) {
@@ -658,21 +869,45 @@ function proxiesData() {
                             this.saving = false;
                             return;
                         }
-                        data.api_provider_id = null;
-                        data.fetch_from_api = false;
-                        data.upstream = {
+                        
+                        const upstreamData = {
                             server: this.formData.upstream.server,
                             port: parseInt(this.formData.upstream.port),
                             username: this.formData.upstream.username || null,
                             password: this.formData.upstream.password || null,
                             protocol: this.formData.upstream.protocol
                         };
+                        
+                        // 如果需要同时添加到代理池
+                        if (this.formData.add_to_pool) {
+                            if (!this.formData.pool_id || !this.formData.pool_name) {
+                                this.notify('请填写代理池 ID 和名称', 'error');
+                                this.saving = false;
+                                return;
+                            }
+                            // 先添加到代理池
+                            const poolAdded = await this.addToUpstreamPool(upstreamData);
+                            if (poolAdded) {
+                                // 使用代理池 ID
+                                data.upstream_id = this.formData.pool_id;
+                                data.upstream = null;
+                            } else {
+                                this.saving = false;
+                                return;
+                            }
+                        } else {
+                            data.upstream = upstreamData;
+                            data.upstream_id = null;
+                        }
+                        data.api_provider_id = null;
+                        data.fetch_from_api = false;
                     }
                 } else {
                     // 直连模式
                     data.api_provider_id = null;
                     data.fetch_from_api = false;
                     data.upstream = null;
+                    data.upstream_id = null;
                 }
                 
                 const url = this.showAddModal 
@@ -692,6 +927,7 @@ function proxiesData() {
                     this.notify(this.showAddModal ? '代理添加成功' : '代理更新成功', 'success');
                     this.closeModal();
                     await this.loadProxies();
+                    await this.loadUpstreamProxies(); // 刷新代理池列表
                 } else {
                     const error = await response.json();
                     this.notify(error.detail || '操作失败', 'error');
@@ -701,6 +937,39 @@ function proxiesData() {
                 this.notify('操作失败', 'error');
             } finally {
                 this.saving = false;
+            }
+        },
+        
+        async addToUpstreamPool(proxyData) {
+            try {
+                const poolData = {
+                    id: this.formData.pool_id,
+                    name: this.formData.pool_name,
+                    proxy: proxyData,
+                    enabled: true,
+                    description: `从代理管理页面添加 - ${this.formData.name}`
+                };
+                
+                const response = await fetch('/api/upstream-proxies', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(poolData)
+                });
+                
+                if (response.ok) {
+                    this.notify('已添加到出口代理池', 'success');
+                    return true;
+                } else {
+                    const error = await response.json();
+                    this.notify('添加到代理池失败: ' + (error.detail || '未知错误'), 'error');
+                    return false;
+                }
+            } catch (error) {
+                console.error('Failed to add to upstream pool:', error);
+                this.notify('添加到代理池失败', 'error');
+                return false;
             }
         },
         
@@ -744,7 +1013,8 @@ function proxiesData() {
                 local_username: '',
                 local_password: '',
                 use_upstream: false,
-                upstream_mode: 'manual',
+                upstream_mode: 'pool',
+                upstream_id: '',
                 vless_link: '',
                 api_provider_id: '',
                 upstream: {
@@ -754,7 +1024,10 @@ function proxiesData() {
                     password: '',
                     protocol: 'socks5'
                 },
-                monitoring_enabled: false
+                monitoring_enabled: false,
+                add_to_pool: false,
+                pool_id: '',
+                pool_name: ''
             };
         },
         

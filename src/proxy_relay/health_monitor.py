@@ -169,7 +169,7 @@ class HealthMonitor:
         with self._lock:
             return self._monitoring_statuses.copy()
     
-    def check_proxy_health(self, upstream: UpstreamProxy) -> tuple[bool, Optional[int], Optional[str]]:
+    def check_proxy_health(self, upstream: UpstreamProxy, local_port: int = None) -> tuple[bool, Optional[int], Optional[str]]:
         """
         检查单个代理的健康状态
         
@@ -177,6 +177,7 @@ class HealthMonitor:
         
         Args:
             upstream: 上游代理配置
+            local_port: 本地端口（用于 VLESS 等需要通过 sing-box 测试的协议）
             
         Returns:
             tuple[bool, Optional[int], Optional[str]]: 
@@ -184,16 +185,61 @@ class HealthMonitor:
                 - 响应时间（毫秒，失败时为None）
                 - 错误信息（成功时为None）
         """
-        # VLESS 协议不支持直接 HTTP 测试
-        if upstream.protocol == "vless":
-            return True, None, "VLESS 协议不支持直接测试，请通过实际使用验证连接"
-        
         config = self.config_manager._current_config
         if not config:
             return False, None, "Configuration not loaded"
         
         check_url = config.monitoring.check_url
         check_timeout = config.monitoring.check_timeout
+        
+        # VLESS 协议需要通过本地 sing-box 端口测试
+        if upstream.protocol == "vless":
+            if not local_port:
+                return True, None, "VLESS 协议需要通过本地端口测试"
+            
+            # 获取本地代理配置
+            proxy_config = self.config_manager.get_proxy_config(local_port)
+            if not proxy_config:
+                return False, None, f"本地端口 {local_port} 配置不存在"
+            
+            # 构建本地代理 URL
+            if proxy_config.local_username and proxy_config.local_password:
+                proxy_url = f"socks5h://{proxy_config.local_username}:{proxy_config.local_password}@127.0.0.1:{local_port}"
+            else:
+                proxy_url = f"socks5h://127.0.0.1:{local_port}"
+            
+            proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            
+            try:
+                logger.debug(f"Checking VLESS proxy health via local port {local_port} -> {check_url}")
+                
+                start_time = time.time()
+                response = requests.get(
+                    check_url,
+                    proxies=proxies,
+                    timeout=check_timeout,
+                    allow_redirects=True
+                )
+                response_time_ms = int((time.time() - start_time) * 1000)
+                
+                if response.status_code == 200:
+                    logger.debug(f"VLESS health check passed: port={local_port}, response_time={response_time_ms}ms")
+                    return True, response_time_ms, None
+                else:
+                    error_msg = f"HTTP status code {response.status_code}"
+                    return False, response_time_ms, error_msg
+                    
+            except requests.exceptions.Timeout:
+                return False, None, f"Timeout after {check_timeout}s"
+            except requests.exceptions.ProxyError as e:
+                return False, None, f"Proxy error: {str(e)}"
+            except requests.exceptions.ConnectionError as e:
+                return False, None, f"Connection error: {str(e)}"
+            except Exception as e:
+                return False, None, f"Unexpected error: {str(e)}"
         
         # 构建代理配置
         proxy_url = self._build_proxy_url(upstream)
@@ -281,12 +327,32 @@ class HealthMonitor:
         try:
             logger.info(f"Triggering proxy switch for port {port}")
             
+            # 获取代理配置
+            proxy_config = self.config_manager.get_proxy_config(port)
+            if not proxy_config:
+                logger.error(f"Proxy configuration for port {port} not found")
+                return
+            
+            # 检查是否配置了 API 提供商
+            if not proxy_config.api_provider_id:
+                logger.warning(f"No API provider configured for port {port}, cannot auto-switch")
+                return
+            
+            # 从 API 获取新代理
+            try:
+                new_upstream = self.proxy_manager.get_new_proxy_from_api(proxy_config.api_provider_id)
+                logger.info(f"Got new upstream from API: {new_upstream.server}:{new_upstream.port}")
+            except Exception as api_error:
+                logger.error(f"Failed to get new proxy from API: {api_error}")
+                return
+            
             # 调用 ProxyManager 的切换方法
-            # 注意：这个方法将在任务 11 中实现
-            if hasattr(self.proxy_manager, 'switch_upstream_proxy'):
-                self.proxy_manager.switch_upstream_proxy(port)
-            else:
-                logger.warning(f"ProxyManager.switch_upstream_proxy not implemented yet")
+            self.proxy_manager.switch_upstream_proxy(
+                local_port=port,
+                new_upstream=new_upstream,
+                reason="health_check_failed"
+            )
+            logger.info(f"Successfully triggered proxy switch for port {port}")
                 
         except Exception as e:
             logger.error(f"Failed to trigger proxy switch for port {port}: {e}", exc_info=True)
@@ -326,7 +392,21 @@ class HealthMonitor:
                 
                 # 执行健康检查
                 upstream = proxy_config.upstream
-                is_healthy, response_time_ms, error_message = self.check_proxy_health(upstream)
+                
+                # 如果使用 upstream_id，从代理池获取配置
+                if not upstream and proxy_config.upstream_id:
+                    for pool_proxy in config.upstream_proxies:
+                        if pool_proxy.id == proxy_config.upstream_id:
+                            upstream = pool_proxy.proxy
+                            break
+                
+                # 如果没有上游代理配置，跳过本次检查
+                if not upstream:
+                    logger.warning(f"No upstream configured for port {port}, skipping health check")
+                    stop_event.wait(timeout=check_interval)
+                    continue
+                
+                is_healthy, response_time_ms, error_message = self.check_proxy_health(upstream, local_port=port)
                 
                 # 更新监控状态
                 with self._lock:

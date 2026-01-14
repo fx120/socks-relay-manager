@@ -354,6 +354,13 @@ class ConfigManager:
                 tls=proxy_data.get('tls', False),
                 sni=proxy_data.get('sni'),
                 alpn=proxy_data.get('alpn'),
+                # Reality 配置
+                reality=proxy_data.get('reality', False),
+                reality_public_key=proxy_data.get('reality_public_key'),
+                reality_short_id=proxy_data.get('reality_short_id'),
+                reality_server_name=proxy_data.get('reality_server_name'),
+                reality_fingerprint=proxy_data.get('reality_fingerprint'),
+                # WebSocket/gRPC 配置
                 ws_path=proxy_data.get('ws_path'),
                 ws_host=proxy_data.get('ws_host'),
                 grpc_service_name=proxy_data.get('grpc_service_name')
@@ -391,6 +398,13 @@ class ConfigManager:
                     tls=upstream_data.get('tls', False),
                     sni=upstream_data.get('sni'),
                     alpn=upstream_data.get('alpn'),
+                    # Reality 配置
+                    reality=upstream_data.get('reality', False),
+                    reality_public_key=upstream_data.get('reality_public_key'),
+                    reality_short_id=upstream_data.get('reality_short_id'),
+                    reality_server_name=upstream_data.get('reality_server_name'),
+                    reality_fingerprint=upstream_data.get('reality_fingerprint'),
+                    # WebSocket/gRPC 配置
                     ws_path=upstream_data.get('ws_path'),
                     ws_host=upstream_data.get('ws_host'),
                     grpc_service_name=upstream_data.get('grpc_service_name')
@@ -518,6 +532,11 @@ class ConfigManager:
                 'tls': upstream.tls,
                 'sni': upstream.sni,
                 'alpn': upstream.alpn,
+                'reality': upstream.reality,
+                'reality_public_key': upstream.reality_public_key,
+                'reality_short_id': upstream.reality_short_id,
+                'reality_server_name': upstream.reality_server_name,
+                'reality_fingerprint': upstream.reality_fingerprint,
                 'ws_path': upstream.ws_path,
                 'ws_host': upstream.ws_host,
                 'grpc_service_name': upstream.grpc_service_name

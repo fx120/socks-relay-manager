@@ -932,8 +932,8 @@ class WebAPI:
                     detail=f"Proxy with port {port} not found"
                 )
             
-            # 验证：如果没有上游代理，不能启动监控
-            if not proxy_config.upstream:
+            # 验证：如果没有上游代理（直接配置或通过代理池引用），不能启动监控
+            if not proxy_config.upstream and not proxy_config.upstream_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot start monitoring for direct mode proxy (no upstream configured). Please configure an upstream proxy first."
@@ -1129,8 +1129,20 @@ class WebAPI:
                     detail=f"Proxy with port {port} not found"
                 )
             
+            # 获取上游代理配置
+            upstream = proxy_config.upstream
+            
+            # 如果使用 upstream_id，从代理池获取配置
+            if not upstream and proxy_config.upstream_id:
+                config = self.config_manager._current_config
+                if config:
+                    for pool_proxy in config.upstream_proxies:
+                        if pool_proxy.id == proxy_config.upstream_id:
+                            upstream = pool_proxy.proxy
+                            break
+            
             # 检查是否有上游代理配置
-            if not proxy_config.upstream:
+            if not upstream:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Proxy port {port} has no upstream configured. Please configure an upstream proxy first."
@@ -1138,7 +1150,7 @@ class WebAPI:
             
             # 测试代理健康状态
             is_healthy, response_time_ms, error_message = self.health_monitor.check_proxy_health(
-                proxy_config.upstream
+                upstream, local_port=port
             )
             
             logger.info(f"Tested proxy for port {port}: healthy={is_healthy}")
@@ -1149,9 +1161,9 @@ class WebAPI:
                 "response_time_ms": response_time_ms,
                 "error_message": error_message,
                 "upstream": {
-                    "server": proxy_config.upstream.server,
-                    "port": proxy_config.upstream.port,
-                    "protocol": proxy_config.upstream.protocol
+                    "server": upstream.server,
+                    "port": upstream.port,
+                    "protocol": upstream.protocol
                 }
             }
             
@@ -2886,9 +2898,17 @@ class WebAPI:
                     detail=f"Upstream proxy with id '{upstream_id}' not found"
                 )
             
+            # 对于 VLESS 代理，需要找一个使用它的本地端口来测试
+            local_port = None
+            if upstream.proxy.protocol == "vless":
+                for proxy in config.proxies:
+                    if proxy.upstream_id == upstream_id:
+                        local_port = proxy.local_port
+                        break
+            
             # 测试代理健康状态
             is_healthy, response_time_ms, error_message = self.health_monitor.check_proxy_health(
-                upstream.proxy
+                upstream.proxy, local_port=local_port
             )
             
             logger.info(f"Tested upstream proxy {upstream_id}: healthy={is_healthy}")
@@ -2963,7 +2983,7 @@ try:
     # 创建组件实例
     _config_manager = ConfigManager(config_path)
     _database = Database(_config_manager._current_config.system.database if _config_manager._current_config else "/var/lib/proxy-relay/data.db")
-    _proxy_manager = ProxyManager(_config_manager, _database)
+    _proxy_manager = ProxyManager(_config_manager, database=_database)
     _health_monitor = HealthMonitor(_config_manager, _proxy_manager, _database)
     
     # 创建应用实例

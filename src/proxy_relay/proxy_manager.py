@@ -120,7 +120,8 @@ class ProxyManager:
                     "tag": outbound_tag,
                     "server": upstream_proxy.server,
                     "server_port": upstream_proxy.port,
-                    "uuid": upstream_proxy.uuid
+                    "uuid": upstream_proxy.uuid,
+                    "domain_strategy": "ipv4_only"  # 强制使用 IPv4，避免 IPv6 连接问题
                 }
                 
                 # Flow 字段（仅在有值时添加）

@@ -240,12 +240,13 @@ class APIClient:
             raise APIError(f"Missing required fields in proxy data: {proxy_data}")
         
         # 提取可选的认证信息
+        # 91http 格式默认使用 http_user 和 http_pass 字段
         username = None
         password = None
-        if format_config.username_field:
-            username = proxy_data.get(format_config.username_field)
-        if format_config.password_field:
-            password = proxy_data.get(format_config.password_field)
+        username_field = format_config.username_field or 'http_user'
+        password_field = format_config.password_field or 'http_pass'
+        username = proxy_data.get(username_field)
+        password = proxy_data.get(password_field)
         
         # 检查是否有协议字段
         protocol = proxy_data.get("protocol", "socks5")
